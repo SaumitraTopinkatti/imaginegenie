@@ -301,6 +301,19 @@ export default function App() {
     [refs.length, pushToast]
   );
 
+  /* ----- paste images from clipboard straight into references ----- */
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const files = e.clipboardData?.files;
+      if (!files || files.length === 0) return; // text-only paste: stay out entirely
+      const images = Array.from(files).filter((f) => f.type.startsWith("image/"));
+      if (images.length === 0) return; // no image items: never preventDefault
+      void addFiles(images);
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [addFiles]);
+
   const removeRef = (i: number) => setRefs((r) => r.filter((_, x) => x !== i));
   const moveRef = (i: number, dir: -1 | 1) =>
     setRefs((r) => {
@@ -943,7 +956,7 @@ export default function App() {
                   void addFiles(e.dataTransfer.files);
                 }}
               >
-                <div className="dz-title">Drop images here or click to browse</div>
+                <div className="dz-title">Drop images here, click to browse, or paste from clipboard</div>
                 <div className="dz-sub">PNG · JPG · WebP — resized to max 2048px in browser</div>
               </div>
               <input
