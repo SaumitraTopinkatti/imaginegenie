@@ -623,8 +623,12 @@ export default function App() {
 
   return (
     <div>
+      <a href="#gallery" className="skip-link">
+        Skip to gallery
+      </a>
       {/* header */}
       <header className="header">
+        <h1 className="visually-hidden">ImagineGenie — AI image studio</h1>
         <div className="header-inner">
           <div className="logo">
             <img
@@ -713,6 +717,7 @@ export default function App() {
               </div>
               <textarea
                 className="prompt"
+                aria-label="Prompt"
                 placeholder="A cozy cabin in a snowy forest at dusk, warm windows, illustration…"
                 value={prompt}
                 maxLength={MAX_PROMPT}
@@ -736,6 +741,7 @@ export default function App() {
                     key={a}
                     type="button"
                     className={aspect === a ? "chip active" : "chip"}
+                    aria-pressed={aspect === a}
                     onClick={() => setAspect(a)}
                   >
                     {a}
@@ -752,6 +758,7 @@ export default function App() {
                 <button
                   type="button"
                   className={resolution === "1K" ? "active" : ""}
+                  aria-pressed={resolution === "1K"}
                   onClick={() => setResolution("1K")}
                 >
                   1K<small>$0.045 / image</small>
@@ -759,6 +766,7 @@ export default function App() {
                 <button
                   type="button"
                   className={resolution === "2K" ? "active" : ""}
+                  aria-pressed={resolution === "2K"}
                   onClick={() => setResolution("2K")}
                 >
                   2K<small>$0.09 / image</small>
@@ -780,6 +788,7 @@ export default function App() {
                     type="number"
                     min={0}
                     step={1}
+                    aria-label="Seed (optional)"
                     placeholder="Random"
                     value={seedStr}
                     onChange={(e) => setSeedStr(e.target.value)}
@@ -799,7 +808,13 @@ export default function App() {
                 <div className="field-label">
                   <span>Count</span>
                 </div>
-                <input type="number" value={1} disabled title="Fixed at 1 by provider" />
+                <input
+                  type="number"
+                  value={1}
+                  disabled
+                  title="Fixed at 1 by provider"
+                  aria-label="Image count, fixed at 1 by provider"
+                />
               </div>
             </div>
 
@@ -814,9 +829,13 @@ export default function App() {
                 className={dragOver ? "dropzone over" : "dropzone"}
                 role="button"
                 tabIndex={0}
+                aria-label="Upload reference images"
                 onClick={() => fileInput.current?.click()}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") fileInput.current?.click();
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    fileInput.current?.click();
+                  }
                 }}
                 onDragOver={(e) => {
                   e.preventDefault();
@@ -890,6 +909,7 @@ export default function App() {
               <div className="key-row">
                 <input
                   type={showKey ? "text" : "password"}
+                  aria-label="OpenRouter API key"
                   placeholder="sk-or-v1-…"
                   value={apiKey}
                   autoComplete="off"
@@ -942,7 +962,14 @@ export default function App() {
             </button>
             {generating && (
               <>
-                <div className="progress">
+                <div
+                  className="progress"
+                  role="progressbar"
+                  aria-label="Generation progress"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(progress)}
+                >
                   <i style={{ width: `${progress}%` }} />
                 </div>
                 <div style={{ marginTop: 8, display: "flex", justifyContent: "center" }}>
@@ -952,13 +979,17 @@ export default function App() {
                 </div>
               </>
             )}
-            {error && <div className="error-box">{error}</div>}
+            {error && (
+              <div className="error-box" role="alert">
+                {error}
+              </div>
+            )}
             <div className="kbd-hint">
               <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to generate
             </div>
           </aside>
 
-          <div className="main-col">
+          <main className="main-col">
             {/* metrics */}
             <section className="metrics" aria-label="Session metrics">
               <div className="metric">
@@ -991,7 +1022,7 @@ export default function App() {
             </section>
 
             {/* gallery */}
-          <section className="panel gallery" aria-label="Gallery">
+          <section id="gallery" className="panel gallery" aria-label="Gallery">
             <div className="gallery-bar">
               <div className="search">
                 <span className="icon">
@@ -999,6 +1030,7 @@ export default function App() {
                 </span>
                 <input
                   type="text"
+                  aria-label="Search prompts"
                   placeholder="Search prompts…"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
@@ -1009,6 +1041,7 @@ export default function App() {
                 onChange={(e) => setAspectFilter(e.target.value)}
                 style={{ width: "auto" }}
                 title="Filter by aspect"
+                aria-label="Filter by aspect"
               >
                 <option value="all">All aspects</option>
                 {ASPECT_RATIOS.map((a) => (
@@ -1108,7 +1141,20 @@ export default function App() {
                   </div>
                 )}
                 {filtered.map((g) => (
-                  <article className="card" key={g.id} onClick={() => setLightbox(g)}>
+                  <article
+                    className="card"
+                    key={g.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Open image: ${g.prompt.slice(0, 120) || "Generated image"}`}
+                    onClick={() => setLightbox(g)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setLightbox(g);
+                      }
+                    }}
+                  >
                     <div className="thumb">
                       <img src={g.thumbUrl} alt={g.prompt.slice(0, 80) || "Generated image"} loading="lazy" />
                       <span className="cost-tag">{fmtCost(g.cost)}</span>
@@ -1180,7 +1226,7 @@ export default function App() {
             Model <code>{MODEL}</code> · n=1 · data URL refs 0–14
           </span>
           </footer>
-        </div>
+        </main>
       </div>
 
       {/* mobile drawer chrome */}
@@ -1205,8 +1251,18 @@ export default function App() {
       {/* lightbox */}
       {lightbox && (
         <div className="overlay" onClick={() => setLightbox(null)}>
-          <div className="lightbox" onClick={(e) => e.stopPropagation()}>
-            <img className="full" src={lightbox.imageUrl} alt={lightbox.prompt} />
+          <div
+            className="lightbox"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Generation details"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              className="full"
+              src={lightbox.imageUrl}
+              alt={lightbox.prompt.slice(0, 120) || "Generated image"}
+            />
             <div className="lb-side">
               <h3>Generation</h3>
               <div className="lb-prompt">{lightbox.prompt}</div>
@@ -1461,6 +1517,7 @@ export default function App() {
                   ref={clearInputRef}
                   type="text"
                   className="confirm-input"
+                  aria-label="Type DELETE to confirm"
                   placeholder="DELETE"
                   autoComplete="off"
                   spellCheck={false}
@@ -1502,7 +1559,7 @@ export default function App() {
       )}
 
       {/* toasts */}
-      <div className="toasts">
+      <div className="toasts" role="status" aria-live="polite">
         {toasts.map((t) => (
           <div key={t.id} className={`toast ${t.kind === "info" ? "" : t.kind}`}>
             <span className="t-ico">

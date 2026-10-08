@@ -188,9 +188,9 @@ select:disabled, input:disabled { opacity: 0.55; cursor: not-allowed; }
   display: grid; place-items: center;
   opacity: 0; transition: opacity 0.15s;
 }
-.ref-thumb:hover .rm { opacity: 1; }
+.ref-thumb:hover .rm, .ref-thumb:focus-within .rm { opacity: 1; }
 .ref-thumb .mv { position: absolute; bottom: 4px; right: 4px; display: flex; gap: 2px; opacity: 0; transition: opacity 0.15s; }
-.ref-thumb:hover .mv { opacity: 1; }
+.ref-thumb:hover .mv, .ref-thumb:focus-within .mv { opacity: 1; }
 .ref-thumb .mv button { width: 20px; height: 20px; border-radius: 6px; border: none; background: rgba(0,0,0,0.7); color: #fff; cursor: pointer; display: grid; place-items: center; }
 
 /* api key */
@@ -380,6 +380,18 @@ html {
 ::-webkit-scrollbar-corner { background: transparent; }
 
 /* ---------- Keyboard focus (visible ring for tab users) ---------- */
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.skip-link {
+  position: absolute; left: 12px; top: -48px; z-index: 200;
+  background: var(--panel-solid); color: var(--text);
+  border: 1px solid var(--brand-1); border-radius: 10px;
+  padding: 8px 14px; font-size: 13px; font-weight: 700; text-decoration: none;
+  transition: top 0.15s ease;
+}
+.skip-link:focus-visible { top: 12px; outline: none; box-shadow: var(--focus-ring); }
 .btn:focus-visible,
 .chip:focus-visible,
 .icon-btn:focus-visible,
@@ -387,7 +399,15 @@ html {
 .seg button:focus-visible,
 .eye:focus-visible,
 .dropzone:focus-visible,
-.peek-bar:focus-visible {
+.peek-bar:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+.card:focus-visible,
+.rm:focus-visible,
+.ref-thumb .mv button:focus-visible,
+.ref-cell-img:focus-visible,
+.ref-cell .icon-btn:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
   border-color: var(--brand-1);
