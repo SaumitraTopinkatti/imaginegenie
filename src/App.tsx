@@ -16,7 +16,9 @@ import {
   makeThumb,
 } from "./lib/images";
 import {
+  broadcastLibChanged,
   clearRecords,
+  countBackupRecords,
   cryptoMode,
   decryptRecord,
   deleteRecord,
@@ -26,6 +28,7 @@ import {
   initCrypto,
   listRawRecords,
   saveRecord,
+  subscribeLibChanged,
   uid,
 } from "./lib/secureStore";
 import {
@@ -77,7 +80,6 @@ const MAX_PROMPT = 4000;
 const PRICE_1K = 0.045;
 const PRICE_2K = 0.09;
 const KEY_SESSION = "imaginegenie.key";
-const TOTALS_KEY = "imaginegenie.totals.v1";
 
 function loadKey(): string {
   try {
@@ -149,6 +151,7 @@ export default function App() {
   const [pendingDelete, setPendingDelete] = useState<Generation | null>(null);
   const [clearStep, setClearStep] = useState<0 | 1 | 2>(0);
   const [clearText, setClearText] = useState("");
+  const [clearing, setClearing] = useState(false);
   const [viewRef, setViewRef] = useState<string | null>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const clearCancelRef = useRef<HTMLButtonElement>(null);
@@ -165,7 +168,7 @@ export default function App() {
     window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4200);
   }, []);
 
-  /* ----- totals (non-sensitive, localStorage) ----- */
+  /* ----- totals (derived in-memory; the old write-only localStorage copy is gone) ----- */
   const totals = useMemo(() => {
     const spend = generations.reduce((s, g) => s + (g.cost || 0), 0);
     const refTotal = generations.reduce((s, g) => s + (g.refCount || 0), 0);
@@ -177,24 +180,9 @@ export default function App() {
     };
   }, [generations]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(
-        TOTALS_KEY,
-        JSON.stringify({ images: totals.images, spend: totals.spend, refs: totals.refs })
-      );
-    } catch {
-      /* noop */
-    }
-  }, [totals]);
-
-  /* ----- boot: key env note + decrypt library ----- */
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const mode = await initCrypto();
-      if (cancelled) return;
-      setAlg(mode === "AES-GCM-256" ? "AES-GCM-256" : cryptoMode());
+  /* ----- library reload: re-list IDB + decrypt (used by boot/import/clear/cross-tab) ----- */
+  const reloadLibrary = useCallback(
+    async (opts?: { silent?: boolean }): Promise<number> => {
       try {
         const raw = await listRawRecords();
         const out: Generation[] = [];
@@ -219,17 +207,30 @@ export default function App() {
             /* skip corrupt record */
           }
         }
-        if (!cancelled) setGenerations(out);
+        setGenerations(out);
+        return out.length;
       } catch {
-        if (!cancelled) pushToast("err", "Could not open encrypted library.");
-      } finally {
-        if (!cancelled) setHistoryLoading(false);
+        if (!opts?.silent) pushToast("err", "Could not open encrypted library.");
+        return -1;
       }
+    },
+    [pushToast]
+  );
+
+  /* ----- boot: key env note + decrypt library ----- */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const mode = await initCrypto();
+      if (cancelled) return;
+      setAlg(mode === "AES-GCM-256" ? "AES-GCM-256" : cryptoMode());
+      await reloadLibrary({ silent: true });
+      if (!cancelled) setHistoryLoading(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [pushToast]);
+  }, [reloadLibrary]);
 
   useEffect(() => {
     try {
@@ -239,6 +240,35 @@ export default function App() {
       /* noop */
     }
   }, [apiKey]);
+
+  /* ----- multi-tab: another tab mutated the library -> re-list + reload ----- */
+  const lastFocusReload = useRef(0);
+  useEffect(() => {
+    const onRemote = () => {
+      void reloadLibrary({ silent: true }).then((n) => {
+        if (n >= 0) pushToast("info", "Library changed in another tab — reloaded");
+      });
+    };
+    const unsubscribe = subscribeLibChanged(onRemote);
+    const onFocus = () => {
+      // Debounced silent refresh: catches mutations missed while unfocused
+      // without hammering IDB on rapid focus flapping.
+      const now = Date.now();
+      if (now - lastFocusReload.current < 2000) return;
+      lastFocusReload.current = now;
+      void reloadLibrary({ silent: true });
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") onFocus();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      unsubscribe();
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [reloadLibrary, pushToast]);
 
   /* ----- refs ----- */
   const addFiles = useCallback(
@@ -296,7 +326,7 @@ export default function App() {
 
   /* ----- generate ----- */
   const doGenerate = useCallback(async () => {
-    if (generating) return;
+    if (generating || clearing) return;
     const key = apiKey.trim();
     if (!key) {
       setError("Add your OpenRouter API key first (left panel).");
@@ -372,6 +402,7 @@ export default function App() {
         refsEnc,
       });
       setGenerations((g) => [gen, ...g]);
+      broadcastLibChanged();
       setProgress(100);
       pushToast("ok", `Image ready — ${fmtCost(res.cost)} this call.`);
       if (window.matchMedia("(max-width: 900px)").matches) setDrawerOpen(false);
@@ -388,7 +419,7 @@ export default function App() {
       setGenerating(false);
       window.setTimeout(() => setProgress(0), 900);
     }
-  }, [generating, apiKey, prompt, aspect, resolution, refs, seedStr, pushToast]);
+  }, [generating, clearing, apiKey, prompt, aspect, resolution, refs, seedStr, pushToast]);
 
   const generateRef = useRef(doGenerate);
   generateRef.current = doGenerate;
@@ -489,6 +520,7 @@ export default function App() {
     if (lightbox?.id === id) setLightbox(null);
     try {
       await deleteRecord(id);
+      broadcastLibChanged();
     } catch {
       pushToast("err", "Delete failed in storage.");
     }
@@ -500,14 +532,26 @@ export default function App() {
   };
 
   const clearAll = async () => {
-    if (generations.length === 0) return;
+    if (generations.length === 0 || clearing) return;
+    setClearing(true);
     setGenerations([]);
     setLightbox(null);
     try {
       await clearRecords();
-      pushToast("ok", "Library cleared.");
+      // Confirm against storage before claiming empty: another tab may have
+      // written concurrently. Reconcile instead of showing a stale empty.
+      const remaining = await listRawRecords();
+      if (remaining.length === 0) {
+        pushToast("ok", "Library cleared.");
+      } else {
+        await reloadLibrary({ silent: true });
+      }
+      broadcastLibChanged();
     } catch {
       pushToast("err", "Clear failed in storage.");
+      await reloadLibrary({ silent: true });
+    } finally {
+      setClearing(false);
     }
   };
 
@@ -549,34 +593,21 @@ export default function App() {
   };
 
   const doImportFile = async (f: File) => {
+    if (clearing) return;
     try {
       const text = await f.text();
+      let inFile: number;
+      try {
+        inFile = countBackupRecords(text);
+      } catch {
+        pushToast("err", "Import failed — not a valid backup.");
+        return;
+      }
+      pushToast("info", `${generations.length} in library, ${inFile} in file.`);
       const n = await importBackup(text);
       pushToast("ok", `Imported ${n} record(s). Reloading…`);
-      const raw = await listRawRecords();
-      const out: Generation[] = [];
-      for (const r of raw) {
-        try {
-          const { imageUrl, thumbUrl, refUrls } = await decryptRecord(r);
-          out.push({
-            id: r.id,
-            createdAt: r.createdAt,
-            prompt: r.prompt,
-            aspectRatio: r.aspectRatio,
-            resolution: r.resolution,
-            cost: r.cost,
-            mediaType: r.mediaType,
-            refCount: r.refCount,
-            seed: r.seed,
-            imageUrl,
-            thumbUrl,
-            refUrls,
-          });
-        } catch {
-          /* skip */
-        }
-      }
-      setGenerations(out);
+      await reloadLibrary({ silent: true });
+      broadcastLibChanged();
     } catch {
       pushToast("err", "Import failed — not a valid backup.");
     }
@@ -946,7 +977,7 @@ export default function App() {
             <button
               type="button"
               className="gen-btn"
-              disabled={generating}
+              disabled={generating || clearing}
               onClick={() => void doGenerate()}
             >
               {generating ? (
@@ -1061,6 +1092,7 @@ export default function App() {
                 <button
                   type="button"
                   className="btn btn-small btn-ghost"
+                  disabled={clearing}
                   onClick={() => importInput.current?.click()}
                 >
                   <UploadIcon size={14} /> Restore
@@ -1068,7 +1100,7 @@ export default function App() {
                 <button
                   type="button"
                   className="btn btn-small btn-ghost"
-                  disabled={generations.length === 0}
+                  disabled={generations.length === 0 || clearing}
                   onClick={() => {
                     setClearText("");
                     setClearStep(1);
@@ -1220,7 +1252,7 @@ export default function App() {
           <footer className="footer">
           <span>
             Images encrypted with <code>{alg}</code> in IndexedDB · never written to disk · totals
-            only in localStorage
+            session-only
           </span>
           <span>
             Model <code>{MODEL}</code> · n=1 · data URL refs 0–14

@@ -155,13 +155,27 @@ export async function initCrypto(): Promise<"AES-GCM-256" | "XOR"> {
         "decrypt",
       ]);
     } else {
-      cryptoKey = await window.crypto.subtle.generateKey(
+      const fresh = await window.crypto.subtle.generateKey(
         { name: "AES-GCM", length: 256 },
         true,
         ["encrypt", "decrypt"]
       );
-      const raw = await window.crypto.subtle.exportKey("raw", cryptoKey);
+      const raw = await window.crypto.subtle.exportKey("raw", fresh);
       await idbPut(d, "meta", { key: "aes-key", b64: bufToB64(raw) });
+      // First-run race: another tab may have generated + stored its own key
+      // concurrently (last-write-wins). Never encrypt with an unconfirmed
+      // orphan key — re-read and adopt whatever is actually stored.
+      const winner = (await idbGet(d, "meta", "aes-key")) as
+        | { key: string; b64: string }
+        | undefined;
+      const winnerRaw = b64ToBytes(winner?.b64 || bufToB64(raw));
+      cryptoKey = await window.crypto.subtle.importKey(
+        "raw",
+        winnerRaw,
+        { name: "AES-GCM" },
+        true,
+        ["encrypt", "decrypt"]
+      );
     }
     d.close();
     return "AES-GCM-256";
@@ -250,8 +264,7 @@ export async function exportBackup(): Promise<string> {
   );
 }
 
-export async function importBackup(json: string): Promise<number> {
-  const parsed = JSON.parse(json) as { app?: string; records?: StoredRecord[] };
+export async function importBackup(json: string): Promise<number> {  const parsed = JSON.parse(json) as { app?: string; records?: StoredRecord[] };
   if (!parsed || !Array.isArray(parsed.records)) throw new Error("Not a valid backup file.");
   const db = await openDb();
   try {
@@ -264,6 +277,54 @@ export async function importBackup(json: string): Promise<number> {
     return n;
   } finally {
     db.close();
+  }
+}
+
+/**
+ * Count valid records in a backup payload without importing.
+ * Throws on invalid payloads (same validation as importBackup).
+ */
+export function countBackupRecords(json: string): number {
+  const parsed = JSON.parse(json) as { app?: string; records?: StoredRecord[] };
+  if (!parsed || !Array.isArray(parsed.records)) throw new Error("Not a valid backup file.");
+  return parsed.records.filter((r) => r && typeof r.id === "string" && !!r.imageEnc).length;
+}
+
+const LIB_CHANNEL = "imaginegenie-lib";
+
+/**
+ * Notify other tabs that the library changed (save/delete/clear/import).
+ * Silent no-op where BroadcastChannel is unsupported.
+ */
+export function broadcastLibChanged(): void {
+  try {
+    if (typeof BroadcastChannel === "undefined") return;
+    const ch = new BroadcastChannel(LIB_CHANNEL);
+    ch.postMessage({ type: "imaginegenie-lib-changed", at: Date.now() });
+    ch.close();
+  } catch {
+    /* unsupported — skip silently */
+  }
+}
+
+/**
+ * Subscribe to library changes from other tabs. Returns an unsubscribe fn.
+ * Silent no-op (immediately-returned noop) where unsupported.
+ */
+export function subscribeLibChanged(cb: () => void): () => void {
+  try {
+    if (typeof BroadcastChannel === "undefined") return () => undefined;
+    const ch = new BroadcastChannel(LIB_CHANNEL);
+    ch.onmessage = () => cb();
+    return () => {
+      try {
+        ch.close();
+      } catch {
+        /* noop */
+      }
+    };
+  } catch {
+    return () => undefined;
   }
 }
 
