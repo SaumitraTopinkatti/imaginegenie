@@ -77,6 +77,12 @@ interface Toast {
 
 const MAX_REFS = 14;
 const MAX_PROMPT = 4000;
+const MAX_COUNT = 4;
+
+function clampCount(n: number): number {
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(MAX_COUNT, Math.max(1, Math.round(n)));
+}
 const PRICE_1K = 0.045;
 const PRICE_2K = 0.09;
 const KEY_SESSION = "imaginegenie.key";
@@ -136,9 +142,10 @@ export default function App() {
   /* ----- generation ----- */
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [progressMax, setProgressMax] = useState(1);
+  const [countStr, setCountStr] = useState("1");
   const [error, setError] = useState("");
   const abortRef = useRef<AbortController | null>(null);
-  const progressTimer = useRef<number | null>(null);
 
   /* ----- library ----- */
   const [generations, setGenerations] = useState<Generation[]>([]);
@@ -346,66 +353,109 @@ export default function App() {
       seed = n;
     }
     setError("");
+    const count = clampCount(Number.parseInt(countStr, 10) || 1);
     setGenerating(true);
-    setProgress(6);
+    setProgressMax(count);
+    setProgress(0);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    if (progressTimer.current) window.clearInterval(progressTimer.current);
-    progressTimer.current = window.setInterval(() => {
-      setProgress((p) => (p >= 92 ? p : p + Math.max(1, (92 - p) / 14)));
-    }, 350);
+    const params = { prompt: prompt.trim(), aspect_ratio: aspect, resolution, refs, seed };
     try {
-      const res = await generateImage(
-        key,
-        { prompt: prompt.trim(), aspect_ratio: aspect, resolution, refs, seed },
-        ctrl.signal
-      );
-      setProgress(96);
-      const fullUrl = b64ToDataUrl(res.b64, res.mediaType);
-      let thumb = fullUrl;
-      try {
-        thumb = await makeThumb(fullUrl);
-      } catch {
-        thumb = fullUrl;
-      }
-      const [imageEnc, thumbEnc, refsEnc] = await Promise.all([
-        encryptText(fullUrl),
-        encryptText(thumb),
-        Promise.all(refs.map((u) => encryptText(u))),
-      ]);
-      const gen: Generation = {
-        id: uid(),
-        createdAt: Date.now(),
-        prompt: prompt.trim(),
-        aspectRatio: aspect,
-        resolution,
-        cost: res.cost,
-        mediaType: res.mediaType,
-        refCount: refs.length,
-        seed,
-        imageUrl: fullUrl,
-        thumbUrl: thumb,
-        refUrls: [...refs],
+      // Fan out N parallel n=1 requests sharing one AbortController, so one
+      // failure (or cancel) never kills the other slots. Single attempt each.
+      let done = 0;
+      const bump = () => {
+        done += 1;
+        setProgress(done);
       };
-      await saveRecord({
-        id: gen.id,
-        createdAt: gen.createdAt,
-        prompt: gen.prompt,
-        aspectRatio: gen.aspectRatio,
-        resolution: gen.resolution,
-        cost: gen.cost,
-        mediaType: gen.mediaType,
-        refCount: gen.refCount,
-        seed: gen.seed,
-        imageEnc,
-        thumbEnc,
-        refsEnc,
-      });
-      setGenerations((g) => [gen, ...g]);
-      broadcastLibChanged();
-      setProgress(100);
-      pushToast("ok", `Image ready — ${fmtCost(res.cost)} this call.`);
-      if (window.matchMedia("(max-width: 900px)").matches) setDrawerOpen(false);
+      const outcomes = await Promise.allSettled(
+        Array.from({ length: count }, () =>
+          generateImage(key, params, ctrl.signal).then(
+            (v) => {
+              bump();
+              return v;
+            },
+            (e) => {
+              bump();
+              throw e;
+            }
+          )
+        )
+      );
+      const saved: Generation[] = [];
+      let firstError = "";
+      for (const o of outcomes) {
+        if (o.status === "fulfilled") {
+          const res = o.value;
+          const fullUrl = b64ToDataUrl(res.b64, res.mediaType);
+          let thumb = fullUrl;
+          try {
+            thumb = await makeThumb(fullUrl);
+          } catch {
+            thumb = fullUrl;
+          }
+          const [imageEnc, thumbEnc, refsEnc] = await Promise.all([
+            encryptText(fullUrl),
+            encryptText(thumb),
+            Promise.all(refs.map((u) => encryptText(u))),
+          ]);
+          const gen: Generation = {
+            id: uid(),
+            createdAt: Date.now(),
+            prompt: prompt.trim(),
+            aspectRatio: aspect,
+            resolution,
+            cost: res.cost,
+            mediaType: res.mediaType,
+            refCount: refs.length,
+            seed,
+            imageUrl: fullUrl,
+            thumbUrl: thumb,
+            refUrls: [...refs],
+          };
+          await saveRecord({
+            id: gen.id,
+            createdAt: gen.createdAt,
+            prompt: gen.prompt,
+            aspectRatio: gen.aspectRatio,
+            resolution: gen.resolution,
+            cost: gen.cost,
+            mediaType: gen.mediaType,
+            refCount: gen.refCount,
+            seed: gen.seed,
+            imageEnc,
+            thumbEnc,
+            refsEnc,
+          });
+          saved.push(gen);
+        } else if (!firstError) {
+          firstError =
+            o.reason instanceof DOMException && o.reason.name === "AbortError"
+              ? ""
+              : o.reason instanceof Error
+                ? o.reason.message
+                : "Generation failed.";
+        }
+      }
+      const aborted = ctrl.signal.aborted;
+      if (saved.length > 0) {
+        setGenerations((g) => [...saved, ...g]);
+        broadcastLibChanged();
+      }
+      if (aborted) {
+        setError("Cancelled.");
+      } else if (saved.length === 0) {
+        setError(firstError || "Generation failed.");
+      } else if (saved.length < count) {
+        pushToast(
+          "err",
+          `Saved ${saved.length} of ${count} images. ${count - saved.length} failed: ${firstError || "unknown error"}`
+        );
+      } else {
+        const total = saved.reduce((s, g) => s + g.cost, 0);
+        pushToast("ok", `Image ready — ${fmtCost(total)} this call.`);
+        if (window.matchMedia("(max-width: 900px)").matches) setDrawerOpen(false);
+      }
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") {
         setError("Cancelled.");
@@ -413,13 +463,11 @@ export default function App() {
         setError(e instanceof Error ? e.message : "Generation failed.");
       }
     } finally {
-      if (progressTimer.current) window.clearInterval(progressTimer.current);
-      progressTimer.current = null;
       abortRef.current = null;
       setGenerating(false);
       window.setTimeout(() => setProgress(0), 900);
     }
-  }, [generating, clearing, apiKey, prompt, aspect, resolution, refs, seedStr, pushToast]);
+  }, [generating, clearing, apiKey, prompt, aspect, resolution, refs, seedStr, countStr, pushToast]);
 
   const generateRef = useRef(doGenerate);
   generateRef.current = doGenerate;
@@ -651,6 +699,8 @@ export default function App() {
   }, [generations, search, aspectFilter]);
 
   const estPrice = resolution === "2K" ? PRICE_2K : PRICE_1K;
+  const countNum = clampCount(Number.parseInt(countStr, 10) || 1);
+  const estTotal = (estPrice + refs.length * 0.003) * countNum;
 
   return (
     <div>
@@ -804,8 +854,7 @@ export default function App() {
                 </button>
               </div>
               <div className="price-hint">
-                Estimate: <b>{fmtCost(estPrice + refs.length * 0.003)}</b> with {refs.length}{" "}
-                ref(s)
+                Estimate: <b>{fmtCost(estTotal)}</b> with {refs.length} ref(s)
               </div>
             </div>
 
@@ -841,10 +890,25 @@ export default function App() {
                 </div>
                 <input
                   type="number"
-                  value={1}
-                  disabled
-                  title="Fixed at 1 by provider"
-                  aria-label="Image count, fixed at 1 by provider"
+                  min={1}
+                  max={4}
+                  step={1}
+                  value={countStr}
+                  disabled={clearing}
+                  aria-label="Image count"
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "") {
+                      setCountStr("");
+                      return;
+                    }
+                    const n = Number(v);
+                    if (Number.isNaN(n)) return;
+                    setCountStr(String(clampCount(n)));
+                  }}
+                  onBlur={() => {
+                    if (countStr === "") setCountStr("1");
+                  }}
                 />
               </div>
             </div>
@@ -983,11 +1047,11 @@ export default function App() {
               {generating ? (
                 <>
                   <span className="spinner" aria-hidden="true" /> Conjuring…{" "}
-                  {Math.round(progress)}%
+                  {Math.round((progress / progressMax) * 100)}%
                 </>
               ) : (
                 <>
-                  <SparkIcon size={18} /> Generate — {fmtCost(estPrice + refs.length * 0.003)}
+                  <SparkIcon size={18} /> Generate — {fmtCost(estTotal)}
                 </>
               )}
             </button>
@@ -998,10 +1062,10 @@ export default function App() {
                   role="progressbar"
                   aria-label="Generation progress"
                   aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={Math.round(progress)}
+                  aria-valuemax={progressMax}
+                  aria-valuenow={progress}
                 >
-                  <i style={{ width: `${progress}%` }} />
+                  <i style={{ width: `${(progress / progressMax) * 100}%` }} />
                 </div>
                 <div style={{ marginTop: 8, display: "flex", justifyContent: "center" }}>
                   <button type="button" className="btn btn-small btn-ghost" onClick={cancelGen}>
