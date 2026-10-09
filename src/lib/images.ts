@@ -89,3 +89,43 @@ export function downloadDataUrl(dataUrl: string, filename: string) {
   a.click();
   a.remove();
 }
+
+/** Copy an image data URL to the clipboard as a PNG blob. */
+export async function copyImageDataUrl(dataUrl: string): Promise<void> {
+  const res = await fetch(dataUrl);
+  const blob = await res.blob();
+  const png = blob.type === "image/png" ? blob : await toPng(blob);
+  await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+}
+
+function toPng(blob: Blob): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const objUrl = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        URL.revokeObjectURL(objUrl);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, img.naturalWidth || img.width);
+        canvas.height = Math.max(1, img.naturalHeight || img.height);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("Canvas not available."));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(
+          (b) => (b ? resolve(b) : reject(new Error("Copy failed."))),
+          "image/png"
+        );
+      } catch (e) {
+        reject(e instanceof Error ? e : new Error("Copy failed."));
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objUrl);
+      reject(new Error("Copy failed."));
+    };
+    img.src = objUrl;
+  });
+}

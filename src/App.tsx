@@ -9,6 +9,7 @@ import {
 } from "./lib/openrouter";
 import {
   b64ToDataUrl,
+  copyImageDataUrl,
   dataUrlToB64,
   downloadDataUrl,
   fileToDataUrl,
@@ -142,10 +143,11 @@ export default function App() {
   /* ----- generation ----- */
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [progressMax, setProgressMax] = useState(1);
   const [countStr, setCountStr] = useState("1");
   const [error, setError] = useState("");
   const abortRef = useRef<AbortController | null>(null);
+  const progressTimer = useRef<number | null>(null);
+  const progressDone = useRef(0);
 
   /* ----- library ----- */
   const [generations, setGenerations] = useState<Generation[]>([]);
@@ -368,18 +370,30 @@ export default function App() {
     setError("");
     const count = clampCount(Number.parseInt(countStr, 10) || 1);
     setGenerating(true);
-    setProgressMax(count);
-    setProgress(0);
+    setProgress(6);
+    progressDone.current = 0;
     const ctrl = new AbortController();
     abortRef.current = ctrl;
+    if (progressTimer.current) window.clearInterval(progressTimer.current);
+    progressTimer.current = window.setInterval(() => {
+      setProgress((p) => {
+        if (p >= 92) {
+          // Hold at ~92% while the API is still working; completions push the floor up.
+          const floor = 6 + (progressDone.current / count) * 86;
+          return Math.max(p, Math.min(floor, 92));
+        }
+        const floor = 6 + (progressDone.current / count) * 86;
+        return Math.min(92, Math.max(p + Math.max(1, (92 - p) / 14), floor));
+      });
+    }, 350);
     const params = { prompt: prompt.trim(), aspect_ratio: aspect, resolution, refs, seed };
     try {
       // Fan out N parallel n=1 requests sharing one AbortController, so one
       // failure (or cancel) never kills the other slots. Single attempt each.
-      let done = 0;
       const bump = () => {
-        done += 1;
-        setProgress(done);
+        progressDone.current += 1;
+        const done = progressDone.current;
+        setProgress((p) => Math.max(p, 6 + (done / count) * 86));
       };
       const outcomes = await Promise.allSettled(
         Array.from({ length: count }, () =>
@@ -451,6 +465,7 @@ export default function App() {
         }
       }
       const aborted = ctrl.signal.aborted;
+      setProgress(96);
       if (saved.length > 0) {
         setGenerations((g) => [...saved, ...g]);
         broadcastLibChanged();
@@ -465,6 +480,7 @@ export default function App() {
           `Saved ${saved.length} of ${count} images. ${count - saved.length} failed: ${firstError || "unknown error"}`
         );
       } else {
+        setProgress(100);
         const total = saved.reduce((s, g) => s + g.cost, 0);
         pushToast("ok", `Image ready — ${fmtCost(total)} this call.`);
         if (window.matchMedia("(max-width: 900px)").matches) setDrawerOpen(false);
@@ -476,6 +492,8 @@ export default function App() {
         setError(e instanceof Error ? e.message : "Generation failed.");
       }
     } finally {
+      if (progressTimer.current) window.clearInterval(progressTimer.current);
+      progressTimer.current = null;
       abortRef.current = null;
       setGenerating(false);
       window.setTimeout(() => setProgress(0), 900);
@@ -574,6 +592,18 @@ export default function App() {
   }, [clearStep]);
 
   const cancelGen = () => abortRef.current?.abort();
+
+  const copyImage = useCallback(
+    async (dataUrl: string) => {
+      try {
+        await copyImageDataUrl(dataUrl);
+        pushToast("ok", "Image copied.");
+      } catch {
+        pushToast("err", "Copy failed in this browser.");
+      }
+    },
+    [pushToast]
+  );
 
   /* ----- library ops ----- */
   const delGen = async (id: string) => {
@@ -1059,8 +1089,7 @@ export default function App() {
             >
               {generating ? (
                 <>
-                  <span className="spinner" aria-hidden="true" /> Conjuring…{" "}
-                  {Math.round((progress / progressMax) * 100)}%
+                  <span className="spinner" aria-hidden="true" /> Conjuring… {Math.round(progress)}%
                 </>
               ) : (
                 <>
@@ -1075,10 +1104,10 @@ export default function App() {
                   role="progressbar"
                   aria-label="Generation progress"
                   aria-valuemin={0}
-                  aria-valuemax={progressMax}
-                  aria-valuenow={progress}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(progress)}
                 >
-                  <i style={{ width: `${(progress / progressMax) * 100}%` }} />
+                  <i style={{ width: `${progress}%` }} />
                 </div>
                 <div style={{ marginTop: 8, display: "flex", justifyContent: "center" }}>
                   <button type="button" className="btn btn-small btn-ghost" onClick={cancelGen}>
@@ -1296,6 +1325,18 @@ export default function App() {
                           <button
                             type="button"
                             className="icon-btn"
+                            title="Copy image"
+                            aria-label="Copy image"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void copyImage(g.imageUrl);
+                            }}
+                          >
+                            <CopyIcon size={15} />
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-btn"
                             title="Download PNG"
                             aria-label="Download PNG"
                             onClick={(e) => {
@@ -1428,6 +1469,15 @@ export default function App() {
                             <button
                               type="button"
                               className="icon-btn"
+                              title="Copy reference image"
+                              aria-label={`Copy reference ${i + 1}`}
+                              onClick={() => void copyImage(u)}
+                            >
+                              <CopyIcon size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              className="icon-btn"
                               title="View full size"
                               aria-label={`View reference ${i + 1} full size`}
                               onClick={() => setViewRef(u)}
@@ -1471,6 +1521,13 @@ export default function App() {
                   }}
                 >
                   <CopyIcon size={14} /> Copy prompt
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  onClick={() => void copyImage(lightbox.imageUrl)}
+                >
+                  <CopyIcon size={14} /> Copy image
                 </button>
                 <button
                   type="button"
@@ -1524,6 +1581,13 @@ export default function App() {
           >
             <img src={viewRef} alt="Reference full size" />
             <div className="ref-view-bar">
+              <button
+                type="button"
+                className="btn btn-small"
+                onClick={() => void copyImage(viewRef)}
+              >
+                <CopyIcon size={14} /> Copy image
+              </button>
               <button
                 type="button"
                 className="btn btn-small"
