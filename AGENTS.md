@@ -8,7 +8,7 @@ Single-user AI image studio (Vite + React 18 + TS). Prompt → Seedream 5.0 Pro 
 - `npm run a11y` — accessibility gate. Run **after** `npm run build`; it starts its own `vite preview` on `127.0.0.1:4173`, scans, kills it. Exits non-zero only on serious/critical findings.
 - `npm run a11y:scan` — scan only; expects a preview server already running.
 - No test runner, no linter. Gates for "done": `tsc` clean + `build` ok + `a11y` 0 serious/critical.
-- Node 18+. Push to `main` auto-deploys to GitHub Pages (`.github/workflows/deploy.yml`: `npm ci` + `npm run build`).
+- Node 18+.
 
 ## Gotchas
 
