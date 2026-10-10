@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { chromium } from "playwright";
 import { AxeBuilder } from "@axe-core/playwright";
 
-const URL = "http://127.0.0.1:4173/imaginegenie/";
+const URL = "http://127.0.0.1:4173/";
 const TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
 function slim(violations) {

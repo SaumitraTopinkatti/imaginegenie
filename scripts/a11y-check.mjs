@@ -6,7 +6,7 @@ import waitOn from "wait-on";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PORT = 4173;
-const URL = `http://127.0.0.1:${PORT}/imaginegenie/`;
+const URL = `http://127.0.0.1:${PORT}/`;
 
 const preview = spawn(
   process.execPath,

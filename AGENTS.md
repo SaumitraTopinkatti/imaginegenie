@@ -12,7 +12,7 @@ Single-user AI image studio (Vite + React 18 + TS). Prompt → Seedream 5.0 Pro 
 
 ## Gotchas
 
-- `vite.config.ts` sets `base: "/imaginegenie/"` — always serve/verify under the `/imaginegenie/` subpath, never root.
+- App is served from root (`/`). Verify previews/screenshots at root, never a subpath.
 - Never manually run preview on port **4173**; `npm run a11y` owns it. For manual screenshots use another port (e.g. 4180+) launched **detached** — a foreground `vite preview` holds the console forever.
 - Kill preview servers and delete temp scripts/screenshots under `a11y/` when done. Only `a11y/axe-results.json` belongs there (gitignored).
 - Loader frames must match the aspect of the card thumb they replace (grid thumbs are square). Mismatched loader/card ratios break the reveal.
