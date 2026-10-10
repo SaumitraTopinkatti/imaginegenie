@@ -8,17 +8,18 @@ Single-user AI image studio (Vite + React 18 + TS). Prompt → Seedream 5.0 Pro 
 - `npm run a11y` — accessibility gate. Run **after** `npm run build`; it starts its own `vite preview` on `127.0.0.1:4173`, scans, kills it. Exits non-zero only on serious/critical findings.
 - `npm run a11y:scan` — scan only; expects a preview server already running.
 - `npm run a11y:all` — run-before-merge: `lint:a11y` → `build` → `a11y` → `e2e:build` → `e2e:a11y`. Zero-cost offline harness (in-memory mock store + loopback mock API on 4190/4191). `npm run e2e` = everything; `e2e:keyboard` = dialog contracts only. Never touch port 4173.
-- No test runner, no linter. Gates for "done": `tsc` clean + `build` ok + `a11y` 0 serious/critical.
-- Node 18+.
+- Runners: Playwright e2e (`npm run e2e`) + `eslint` jsx-a11y (`npm run lint:a11y`). Gates for "done": `lint:a11y` clean + `tsc` clean + `build` ok + `a11y` 0 serious/critical + `e2e:a11y` green (or full `npm run a11y:all`).
+- Node ≥18.18 (eslint 9 floor).
 
 ## Gotchas
 
 - App is served from root (`/`). Verify previews/screenshots at root, never a subpath.
 - Never manually run preview on port **4173**; `npm run a11y` owns it. For manual screenshots use another port (e.g. 4180+) launched **detached** — a foreground `vite preview` holds the console forever.
-- Kill preview servers and delete temp scripts/screenshots under `a11y/` when done. Only `a11y/axe-results.json` belongs there (gitignored).
+- Kill preview servers and delete temp scripts/screenshots when done. Under `a11y/`: `axe-results.json` + `states/*.json` are gitignored per-run output; `e2e/__aria__/` snapshots are committed. Also clear `e2e-results/`, `playwright-report/`, `dist-e2e/` (all gitignored).
 - Loader frames must match the aspect of the card thumb they replace (grid thumbs are square). Mismatched loader/card ratios break the reveal.
 - Scroll fades use CSS `mask-image`, not overlay strips/`::before` gradients — axe flags those as incomplete color-contrast.
 - Security headers + enforcing CSP ship via `public/_headers` (Netlify, copied to `dist/`). New external host (API base, fonts, images) → update the matching CSP directive there and re-validate (see README `## Security`). `frame-ancestors 'none'` + `X-Frame-Options: DENY` must stay — app is never embedded.
+- `dist-e2e/` is a mock-instrumented build (mock store + loopback API). Never ship it — `e2e-sentinel.mjs` fails if the mock hook is missing from `dist-e2e/` or present in production `dist/`.
 
 ## Architecture
 

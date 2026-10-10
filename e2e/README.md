@@ -35,10 +35,11 @@ Ports (env-overridable): app 4190 (`E2E_APP_PORT`), mock API 4191
   the server is shared across parallel workers. Per-prompt counters keep
   `fail-nth` parallel-safe.
 - `mock-api/png.mjs` — deterministic PNG fixtures (zlib encoder, no binaries).
-- `a11y/states.spec.ts` — ~28 states × projects; emulation runs a subset;
+- `a11y/states.spec.ts` — ~30 states × projects; emulation runs a subset;
   ARIA snapshots (`__aria__/`) assert on desktop only.
-- `a11y/allowlist.json` — known incompletes with justification (currently only
-  `color-contrast`).
+- `a11y/allowlist.json` — known incompletes with justification (`color-contrast`
+  + one scoped `aria-valid-attr-value` on `lib-menu-open`: `true` is spec-valid,
+  popup is `role=group`, axe cannot verify popup type).
 - `keyboard/dialogs.spec.ts` — contract × 8 dialogs + menu/combobox/edit/skip/Ctrl+Enter.
 - `emulation/matrix.spec.ts` — viewport reflow, 1.4.12 spacing, target-size sweep
   (opacity-0 controls excluded; see limits).

@@ -26,3 +26,8 @@ npm run build && npm run a11y
   non-zero on any violation.
 - `npm run a11y:all` → `lint:a11y` → `build` → `a11y` → `e2e:build` → `e2e:a11y`:
   single run-before-merge command.
+- `npm run lint:a11y` → `eslint src --max-warnings 0` (jsx-a11y strict,
+  static only — no browser).
+- `npm run e2e` → `build` + `e2e:build` + all Playwright projects (full suite).
+- `npm run e2e:keyboard` → Playwright `e2e/keyboard` only (dialog contracts,
+  fastest signal for focus/Esc/return work).
