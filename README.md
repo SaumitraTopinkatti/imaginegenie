@@ -43,8 +43,29 @@ Prerequisites: Node.js 18+.
    npm run dev
    ```
 
-## Scripts
+## Security
 
+Headers + CSP ship via `public/_headers` (Netlify, copied to `dist/` on build):
+
+- Clickjacking: `X-Frame-Options: DENY` + `frame-ancestors 'none'`.
+- `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`,
+  restrictive `Permissions-Policy`, `Cross-Origin-Opener-Policy: same-origin`.
+- Enforcing CSP: scripts/styles/images self-only, fonts from Google Fonts,
+  API calls to `https://openrouter.ai` only. If you set a custom
+  `VITE_OPENROUTER_BASE`, add its origin to `connect-src` in `public/_headers`.
+
+Threat-model notes (honest limits, no passphrase changes planned):
+
+- API key: held in tab memory (opt-in AES-GCM remembered copy in IndexedDB,
+  decrypted only for viewing / Test / Generate). Any XSS that executes JS in
+  the page can read it — no client-side storage survives that. A backend proxy
+  holding the key is the only stronger isolation, deliberately not built.
+- Local library: AES-GCM with a device-held key stored alongside the data.
+  Protection against casual inspection only (e.g. glancing at DevTools), not
+  against anyone with profile/filesystem access. Passphrase-derived encryption
+  would change that at the cost of an unlock step on every visit.
+
+## Scripts
 - `npm run dev` — start Vite dev server
 - `npm run build` — typecheck (`tsc --noEmit`) and build to `dist/`
 - `npm run preview` — preview the production build

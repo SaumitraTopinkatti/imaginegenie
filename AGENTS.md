@@ -17,6 +17,7 @@ Single-user AI image studio (Vite + React 18 + TS). Prompt → Seedream 5.0 Pro 
 - Kill preview servers and delete temp scripts/screenshots under `a11y/` when done. Only `a11y/axe-results.json` belongs there (gitignored).
 - Loader frames must match the aspect of the card thumb they replace (grid thumbs are square). Mismatched loader/card ratios break the reveal.
 - Scroll fades use CSS `mask-image`, not overlay strips/`::before` gradients — axe flags those as incomplete color-contrast.
+- Security headers + enforcing CSP ship via `public/_headers` (Netlify, copied to `dist/`). New external host (API base, fonts, images) → update the matching CSP directive there and re-validate (see README `## Security`). `frame-ancestors 'none'` + `X-Frame-Options: DENY` must stay — app is never embedded.
 
 ## Architecture
 
