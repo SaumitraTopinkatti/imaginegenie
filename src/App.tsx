@@ -18,16 +18,20 @@ import {
 } from "./lib/images";
 import {
   broadcastLibChanged,
+  clearApiKeyPayload,
   clearRecords,
   countBackupRecords,
   cryptoMode,
   decryptRecord,
+  decryptText,
   deleteRecord,
   encryptText,
   exportBackup,
   importBackup,
   initCrypto,
   listRawRecords,
+  loadApiKeyPayload,
+  saveApiKeyPayload,
   saveRecord,
   subscribeLibChanged,
   uid,
@@ -134,8 +138,6 @@ function aspectCss(label: string): string {
 }
 const PRICE_1K = 0.045;
 const PRICE_2K = 0.09;
-const KEY_SESSION = "imaginegenie.key";
-
 type TabId = "studio" | "refs";
 const TABS: Array<{ id: TabId; label: string; Icon: (props: { size?: number }) => JSX.Element }> = [
   { id: "studio", label: "Studio", Icon: GalleryIcon },
@@ -143,12 +145,6 @@ const TABS: Array<{ id: TabId; label: string; Icon: (props: { size?: number }) =
 ];
 
 function loadKey(): string {
-  try {
-    const s = sessionStorage.getItem(KEY_SESSION);
-    if (s) return s;
-  } catch {
-    /* noop */
-  }
   try {
     const env = (import.meta as unknown as { env: Record<string, string | undefined> }).env;
     return env.VITE_OPENROUTER_API_KEY || "";
@@ -277,6 +273,7 @@ function GenCard({ g, reveal = false, onOpen, onRetry, onCopy, onDownload, onDel
 export default function App() {
   /* ----- api key ----- */
   const [apiKey, setApiKey] = useState<string>(() => loadKey());
+  const [rememberKey, setRememberKey] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [keyMsg, setKeyMsg] = useState<{ text: string; kind: "ok" | "err" | "" }>({
     text: "",
@@ -347,16 +344,47 @@ export default function App() {
   const libMenuRef = useRef<HTMLDivElement>(null);
   const keyInputRef = useRef<HTMLInputElement>(null);
 
+  /* ----- key resolution: working copy first, encrypted store on demand.
+     Plaintext exists only while the modal is open or a request runs. ----- */
+  const resolveKey = useCallback(async (): Promise<string> => {
+    if (apiKey.trim()) return apiKey.trim();
+    if (!rememberKey) return "";
+    try {
+      const stored = await loadApiKeyPayload();
+      if (!stored) return "";
+      return await decryptText(stored);
+    } catch {
+      return "";
+    }
+  }, [apiKey, rememberKey]);
+
+  const openKeyModal = useCallback(() => {
+    setKeyMsg({ text: "", kind: "" });
+    // Remembered key materializes only for viewing; closing drops it again.
+    if (rememberKey && !apiKey.trim()) {
+      void resolveKey().then((k) => {
+        if (k) setApiKey(k);
+      });
+    }
+    setKeyModalOpen(true);
+  }, [apiKey, rememberKey, resolveKey]);
+
+  const closeKeyModal = useCallback(() => {
+    setKeyModalOpen(false);
+    // Drop the working copy; the encrypted copy stays as the store of record.
+    if (rememberKey) setApiKey("");
+  }, [rememberKey]);
+
   /* ----- key modal: Esc closes it, the input is focused on open ----- */
   useEffect(() => {
     if (!keyModalOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setKeyModalOpen(false);
+      if (e.key === "Escape") closeKeyModal();
     };
     window.addEventListener("keydown", onKey);
     keyInputRef.current?.focus();
     return () => window.removeEventListener("keydown", onKey);
-  }, [keyModalOpen]);
+  }, [keyModalOpen, closeKeyModal]);
 
   /* ----- side drawer: Esc closes it, focus moves in on open ----- */
   useEffect(() => {
@@ -449,6 +477,16 @@ export default function App() {
       if (cancelled) return;
       setAlg(mode === "AES-GCM-256" ? "AES-GCM-256" : cryptoMode());
       await reloadLibrary({ silent: true });
+      if (cancelled) return;
+      // Opt-in remembered key: flag it. Plaintext is decrypted on demand
+      // (modal view, Test, Generate) and never held in memory otherwise.
+      try {
+        const stored = await loadApiKeyPayload();
+        if (cancelled) return;
+        if (stored) setRememberKey(true);
+      } catch {
+        /* no remembered key: stay manual */
+      }
       if (!cancelled) setHistoryLoading(false);
     })();
     return () => {
@@ -456,14 +494,24 @@ export default function App() {
     };
   }, [reloadLibrary]);
 
+  /* ----- remembered key: persist the encrypted copy; never auto-delete.
+     Deletion happens only via explicit uncheck (encrypted copy stays as the
+     store of record when the working copy is dropped on modal close). ----- */
   useEffect(() => {
-    try {
-      if (apiKey) sessionStorage.setItem(KEY_SESSION, apiKey);
-      else sessionStorage.removeItem(KEY_SESSION);
-    } catch {
-      /* noop */
-    }
-  }, [apiKey]);
+    if (!rememberKey || !apiKey.trim()) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const payload = await encryptText(apiKey.trim());
+        if (!cancelled) await saveApiKeyPayload(payload);
+      } catch {
+        /* keep the in-memory key; persistence just skips a beat */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiKey, rememberKey]);
 
   /* ----- multi-tab: another tab mutated the library -> re-list + reload ----- */
   const lastFocusReload = useRef(0);
@@ -546,14 +594,15 @@ export default function App() {
 
   /* ----- key test ----- */
   const doTest = async () => {
-    if (!apiKey.trim()) {
+    const key = await resolveKey();
+    if (!key) {
       setKeyMsg({ text: "Paste your OpenRouter key first.", kind: "err" });
       return;
     }
     setTesting(true);
     setKeyMsg({ text: "", kind: "" });
     try {
-      await testKey(apiKey.trim());
+      await testKey(key);
       setKeyMsg({ text: "Works — your key is valid.", kind: "ok" });
     } catch (e) {
       setKeyMsg({ text: e instanceof Error ? e.message : "Connection failed.", kind: "err" });
@@ -565,7 +614,7 @@ export default function App() {
   /* ----- generate ----- */
   const doGenerate = useCallback(async () => {
     if (generating || clearing) return;
-    const key = apiKey.trim();
+    const key = await resolveKey();
     if (!key) {
       setError("Add your OpenRouter API key first (key button in the header).");
       return;
@@ -733,7 +782,7 @@ export default function App() {
       setGenerating(false);
       window.setTimeout(() => setProgress(0), 900);
     }
-  }, [generating, clearing, apiKey, prompt, aspect, resolution, refs, seedStr, countStr, pushToast]);
+  }, [generating, clearing, resolveKey, prompt, aspect, resolution, refs, seedStr, countStr, pushToast]);
 
   const generateRef = useRef(doGenerate);
   generateRef.current = doGenerate;
@@ -1121,17 +1170,16 @@ export default function App() {
           <div className="header-actions">
             <button
               type="button"
-              className={apiKey.trim() ? "key-btn" : "key-btn not-set"}
+              className={apiKey.trim() || rememberKey ? "key-btn" : "key-btn not-set"}
               onClick={() => {
-                setKeyMsg({ text: "", kind: "" });
-                setKeyModalOpen(true);
+                openKeyModal();
               }}
-              title={apiKey.trim() ? "API key connected — manage key" : "Add your OpenRouter API key"}
+              title={(apiKey.trim() || rememberKey) ? "API key connected — manage key" : "Add your OpenRouter API key"}
               aria-haspopup="dialog"
             >
               <KeyIcon size={15} />
-              <span className="key-mask">{apiKey.trim() ? maskKey(apiKey.trim()) : "no key"}</span>
-              <span className="key-state">{apiKey.trim() ? "Connected" : "Not set"}</span>
+              <span className="key-mask">{apiKey.trim() ? maskKey(apiKey.trim()) : rememberKey ? "••••••" : "no key"}</span>
+              <span className="key-state">{apiKey.trim() || rememberKey ? "Connected" : "Not set"}</span>
             </button>
           </div>
         </div>
@@ -2157,7 +2205,7 @@ export default function App() {
 
       {/* api key modal */}
       {keyModalOpen && (
-        <div className="overlay overlay-top" onClick={() => setKeyModalOpen(false)}>
+        <div className="overlay overlay-top" onClick={() => closeKeyModal()}>
           <div
             className="confirm-card"
             role="dialog"
@@ -2167,8 +2215,9 @@ export default function App() {
           >
             <h3 id="key-modal-title">OpenRouter API key</h3>
             <p>
-              Paste your key to enable generation. It stays in memory + this tab
-              only — never written to disk.
+              Paste your key to enable generation. Without remembering it stays
+              in this tab only; remembering stores it encrypted on this device
+              and decrypts it only for viewing and generating.
             </p>
             <div className="key-row">
               <input
@@ -2197,11 +2246,23 @@ export default function App() {
             <div className={keyMsg.kind === "err" ? "key-status err" : "key-status ok"}>
               {keyMsg.text}
             </div>
+            <label className="remember-row">
+              <input
+                type="checkbox"
+                checked={rememberKey}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  setRememberKey(on);
+                  if (!on) void clearApiKeyPayload().catch(() => {});
+                }}
+              />
+              <span>Remember on this device (encrypted)</span>
+            </label>
             <div className="confirm-actions">
               <button
                 type="button"
                 className="btn btn-small btn-ghost"
-                onClick={() => setKeyModalOpen(false)}
+                onClick={() => closeKeyModal()}
               >
                 Close
               </button>

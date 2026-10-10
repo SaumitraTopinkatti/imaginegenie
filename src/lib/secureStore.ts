@@ -213,6 +213,45 @@ export function cryptoMode(): string {
   return useXor ? "XOR" : "AES-GCM-256";
 }
 
+/**
+ * Opt-in remembered API key. Stored as an encrypted payload in `meta` under
+ * "openrouter-key", so it survives restarts but is unreadable without the
+ * device library key. Same-origin JS can still use it — this protects the
+ * key at rest on a shared device, nothing more.
+ */
+const API_KEY_META = "openrouter-key";
+
+export async function saveApiKeyPayload(p: EncryptedPayload): Promise<void> {
+  const db = await openDb();
+  try {
+    await idbPut(db, "meta", { key: API_KEY_META, iv: p.iv, data: p.data, alg: p.alg });
+  } finally {
+    db.close();
+  }
+}
+
+export async function loadApiKeyPayload(): Promise<EncryptedPayload | null> {
+  const db = await openDb();
+  try {
+    const row = (await idbGet(db, "meta", API_KEY_META)) as
+      | (EncryptedPayload & { key: string })
+      | undefined;
+    if (!row || !row.data || (row.alg !== "AES-GCM-256" && row.alg !== "XOR")) return null;
+    return { iv: row.iv, data: row.data, alg: row.alg };
+  } finally {
+    db.close();
+  }
+}
+
+export async function clearApiKeyPayload(): Promise<void> {
+  const db = await openDb();
+  try {
+    await idbDelete(db, "meta", API_KEY_META);
+  } finally {
+    db.close();
+  }
+}
+
 export async function encryptText(plain: string): Promise<EncryptedPayload> {
   if (useXor || !cryptoKey) return { iv: "xor", data: xorCrypt(plain), alg: "XOR" };
   const iv = window.crypto.getRandomValues(new Uint8Array(12));

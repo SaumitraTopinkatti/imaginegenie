@@ -35,7 +35,7 @@ Single-user AI image studio (Vite + React 18 + TS). Prompt → Seedream 5.0 Pro 
 
 - Real OpenRouter image calls cost money. **Ask before any real generation** during dev/verification; verify with mocks/screenshots.
 - **Seedream 5.0 Pro only.** No model switches/additions without an explicit request.
-- API key lives in memory + `.env` (`VITE_OPENROUTER_API_KEY`, see `.env.example`). Never commit, log, or print keys; clear test keys after use. `output-*.png`, `.env*`, `a11y/axe-results.json` are gitignored.
+- API key lives in tab memory + `.env` (`VITE_OPENROUTER_API_KEY`, see `.env.example`). Opt-in "remember" keeps an AES-GCM copy in IndexedDB (`openrouter-key` in `secureStore.ts`), decrypted only for viewing / Test / Generate via `resolveKey`, working copy dropped on modal close. Never `sessionStorage`/plaintext at rest, never commit/log/print keys; clear test keys after use. `output-*.png`, `.env*`, `a11y/axe-results.json` are gitignored.
 
 ## Design conventions (don't regress)
 
