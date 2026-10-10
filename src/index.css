@@ -83,17 +83,16 @@ textarea::placeholder, input::placeholder { color: #7f8986; }
 .brand-sub { font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin-top: 2px; }
 .header-spacer { flex: 1; }
 .header-actions { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.model-btn, .key-btn {
+.key-btn {
   display: inline-flex; align-items: center; gap: 8px;
   height: 38px; padding: 0 12px;
   border: 1px solid var(--line); background: var(--surface); border-radius: 10px;
   font-size: 13px; font-weight: 500;
 }
-.model-btn .dot { width: 8px; height: 8px; background: var(--teal); flex: none; }
-.model-btn svg { flex: none; }
 .key-btn .key-mask { font-family: var(--font-mono); font-size: 12px; }
 .key-btn .key-state { font-size: 12px; color: var(--teal-dark); font-weight: 500; }
 .key-btn.not-set .key-state { color: var(--danger); }
+.key-btn:hover { border-color: var(--teal-dark); background: var(--teal-pale); }
 
 /* hamburger toggle (side drawer) */
 .nav-toggle {
@@ -197,7 +196,7 @@ textarea::placeholder, input::placeholder { color: #7f8986; }
 .composer-top { padding: 20px 20px 0; display: flex; flex-direction: column; gap: 22px; }
 .composer-head { display: flex; flex-direction: column; gap: 4px; }
 .composer-title { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px; }
-.composer-model { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.model-select { background-color: var(--bg); font-weight: 500; }
 .panel-title { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; margin: 0 0 6px; }
 .panel-desc { font-size: 12.5px; color: var(--muted); margin: 0 0 16px; line-height: 1.55; }
 .field { margin-bottom: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
@@ -219,6 +218,7 @@ select, input[type="text"], input[type="password"], input[type="number"] {
 }
 .composer-top textarea.prompt, .composer-top input { background: var(--bg); }
 select:focus, input:focus { border-color: var(--teal-dark); }
+select:hover:not(:disabled) { border-color: var(--teal-dark); }
 select:disabled, input:disabled { opacity: 0.55; cursor: not-allowed; }
 /* native arrow off everywhere: one drawn chevron, same on all platforms */
 select {
@@ -241,6 +241,8 @@ select {
 }
 .shape-btn .box { display: block; border-radius: 2px; box-sizing: border-box; }
 .shape-btn .lbl { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.shape-btn:hover { border-color: var(--teal-dark); background: var(--teal-pale); }
+.shape-btn:hover .lbl { color: var(--teal-dark); }
 .shape-btn[aria-pressed="true"] { border-color: var(--teal-dark); background: var(--teal-pale); }
 .shape-btn[aria-pressed="true"] .lbl { color: var(--teal-dark); }
 .shape-more { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -248,6 +250,7 @@ select {
   align-self: flex-start; border: 0; background: transparent; padding: 4px 6px; margin-left: -6px;
   border-radius: 6px; color: var(--teal-dark); font-size: 13px; font-weight: 500;
 }
+.shape-toggle:hover { text-decoration: underline; text-underline-offset: 3px; }
 /* legacy chips stay light for compat */
 .aspect-grid { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
@@ -266,6 +269,7 @@ select {
   background: var(--surface); color: var(--text); font-weight: 600; font-size: 13.5px;
 }
 .seg button small { font-family: var(--font-mono); font-size: 12px; font-weight: 400; color: var(--muted); }
+.seg button:hover:not(.active):not([aria-pressed="true"]) { border-color: var(--teal-dark); background: var(--teal-pale); }
 .seg button.active, .seg button[aria-pressed="true"] { background: var(--teal-pale); border-color: var(--teal-dark); }
 .seg button.active small, .seg button[aria-pressed="true"] small { color: var(--teal-dark); }
 
@@ -280,6 +284,7 @@ select {
   display: grid; place-items: center; color: var(--text); font-size: 16px;
 }
 .stepper button:disabled { opacity: 0.4; }
+.stepper button:hover:not(:disabled) { background: var(--teal-pale); color: var(--teal-dark); }
 .stepper .val { flex: 1; text-align: center; font-family: var(--font-mono); font-size: 14px; font-weight: 500; }
 .seed-row { display: flex; gap: 6px; min-width: 0; }
 .seed-row input { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 13px; }
@@ -316,10 +321,12 @@ select {
 .ref-thumb .mv { position: absolute; bottom: 4px; right: 4px; display: flex; gap: 2px; opacity: 0; transition: opacity 0.15s; }
 .ref-thumb:hover .mv, .ref-thumb:focus-within .mv { opacity: 1; }
 .ref-thumb .mv button { width: 20px; height: 20px; border-radius: 6px; border: none; background: rgba(18,32,30,0.7); color: #fff; cursor: pointer; display: grid; place-items: center; }
+.ref-thumb .rm:hover, .ref-thumb .mv button:hover { background: var(--teal-dark); }
 
 .lib-link-row { display: flex; margin-top: 8px; }
 .lib-link-row .btn { width: 100%; }
 .lib-link { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; padding: 4px 6px; margin-left: -6px; border-radius: 6px; color: var(--teal-dark); font-size: 13px; font-weight: 500; }
+.lib-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 .tab-count {
   font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
   border: 1px solid var(--line); border-radius: 999px; padding: 0 6px;
@@ -342,6 +349,7 @@ select {
 .key-status.ok { color: var(--teal-dark); } .key-status.err { color: var(--danger); }
 .key-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
 .eye { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 15px; padding: 4px; display: grid; place-items: center; }
+.eye:hover { color: var(--teal-dark); }
 .composer .field, .composer .aspect-grid, .composer .dropzone, .composer .ref-grid { min-width: 0; max-width: 100%; }
 .composer img, .gallery img { max-width: 100%; }
 .sheet-grab { display: none; }
@@ -506,6 +514,7 @@ select {
 .refs-drop .dz-ico { display: none; }
 .ref-card { cursor: default; }
 .ref-card .thumb { display: block; width: 100%; padding: 0; border: none; cursor: zoom-in; background: var(--surface-2); }
+.ref-card .thumb:hover img { filter: brightness(0.94); }
 .ref-card .thumb img { object-position: center; }
 .ref-card .size-tag {
   position: absolute; top: 8px; right: 8px; font-family: var(--font-mono); font-size: 11px; font-weight: 600;
@@ -572,6 +581,7 @@ select {
 .ref-strip { display: flex; gap: 8px; flex-wrap: wrap; }
 .ref-cell { position: relative; width: 76px; }
 .ref-cell-img { display: block; width: 76px; height: 76px; padding: 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: var(--surface-2); cursor: zoom-in; }
+.ref-cell-img:hover { border-color: var(--teal-dark); }
 .ref-cell-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .ref-cell-actions { position: absolute; top: 4px; right: 4px; display: flex; gap: 4px; opacity: 0; transition: opacity 0.15s; }
 .ref-cell:hover .ref-cell-actions, .ref-cell:focus-within .ref-cell-actions { opacity: 1; }
@@ -582,6 +592,15 @@ select {
 .ref-view { width: min(880px, 94vw); background: var(--surface); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow); padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 .ref-view img { width: 100%; max-height: 76vh; object-fit: contain; border-radius: 12px; background: var(--surface-2); }
 .ref-view-bar { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+
+/* press feedback: every control answers a click/tap (touch has no hover) */
+.btn:active:not(:disabled), .btn-danger:active:not(:disabled),
+.icon-btn:active, .gen-btn:active:not(:disabled), .key-btn:active,
+.nav-toggle:active, .chip:active, .shape-btn:active, .seg button:active,
+.stepper button:active:not(:disabled), .drawer-item:active, .peek-bar:active,
+.menu-pop button:active, .ref-suggest-pop button:active,
+.shape-toggle:active, .lib-link:active, .eye:active,
+.ref-cell-img:active, .ref-thumb .rm:active, .ref-thumb .mv button:active { filter: brightness(0.93); }
 
 /* ---------- Scrollbars (light) ---------- */
 html {
@@ -668,6 +687,7 @@ html {
     transition: opacity 0.25s ease, transform 0.25s ease;
   }
   .peek-bar.peek-hidden { opacity: 0; pointer-events: none; transform: translateY(16px); }
+  .peek-bar:hover { box-shadow: inset 0 0 0 999px rgba(0, 0, 0, 0.12), 0 14px 40px rgba(18, 32, 30, 0.3); }
   .sheet-backdrop { display: block; position: fixed; inset: 0; z-index: 80; background: rgba(18, 32, 30, 0.32); }
   /* mobile: header wraps taller than --header-h, so the drawer goes full-height
      above it with its own close row instead of clipping the header buttons */

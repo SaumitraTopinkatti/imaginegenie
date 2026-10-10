@@ -1119,11 +1119,6 @@ export default function App() {
             </div>
           </div>
           <div className="header-actions">
-            <span className="model-btn" title={MODEL}>
-              <span className="dot" aria-hidden="true" />
-              <span>Seedream 5.0 Pro</span>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5D6966" strokeWidth="2" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
-            </span>
             <button
               type="button"
               className={apiKey.trim() ? "key-btn" : "key-btn not-set"}
@@ -1232,7 +1227,20 @@ export default function App() {
             <h2 className="composer-title">
               New <span className="title-serif">image</span>
             </h2>
-            <span className="composer-model">{MODEL}</span>
+            </div>
+
+            <div className="field">
+              <div className="field-label">
+                <span>Model</span>
+              </div>
+              <select
+                className="model-select"
+                value={MODEL}
+                onChange={() => {}}
+                aria-label="Model"
+              >
+                <option value={MODEL}>Seedream 5.0 Pro</option>
+              </select>
             </div>
 
             <div className="field">
