@@ -84,6 +84,13 @@ interface Toast {
   text: string;
 }
 
+/** Composer tray entry. The id is a stable per-session key so React never
+ *  confuses two thumbnails (identical files share identical bytes). */
+interface RefItem {
+  id: string;
+  url: string;
+}
+
 const MAX_REFS = 14;
 const MAX_PROMPT = 4000;
 const MAX_COUNT = 4;
@@ -287,7 +294,11 @@ export default function App() {
   const [aspect, setAspect] = useState<string>("auto");
   const [resolution, setResolution] = useState<Resolution>("1K");
   const [seedStr, setSeedStr] = useState("");
-  const [refs, setRefs] = useState<string[]>([]);
+  const [refs, setRefs] = useState<RefItem[]>([]);
+  const refSeq = useRef(0);
+  const newRefId = () => `r${Date.now().toString(36)}-${refSeq.current++}`;
+  const toRefItems = (urls: string[]): RefItem[] =>
+    urls.map((url) => ({ id: newRefId(), url }));
   const [dragOver, setDragOver] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -558,7 +569,7 @@ export default function App() {
       }
       try {
         const urls = await Promise.all(list.map((f) => fileToDataUrl(f)));
-        setRefs((r) => [...r, ...urls].slice(0, MAX_REFS));
+        setRefs((r) => [...r, ...toRefItems(urls)].slice(0, MAX_REFS));
       } catch (e) {
         pushToast("err", e instanceof Error ? e.message : "Could not read images.");
       }
@@ -580,11 +591,12 @@ export default function App() {
     return () => document.removeEventListener("paste", onPaste);
   }, [addFiles, tab]);
 
-  const removeRef = (i: number) => setRefs((r) => r.filter((_, x) => x !== i));
-  const moveRef = (i: number, dir: -1 | 1) =>
+  const removeRef = (id: string) => setRefs((r) => r.filter((x) => x.id !== id));
+  const moveRef = (id: string, dir: -1 | 1) =>
     setRefs((r) => {
+      const i = r.findIndex((x) => x.id === id);
       const j = i + dir;
-      if (j < 0 || j >= r.length) return r;
+      if (i < 0 || j < 0 || j >= r.length) return r;
       const copy = [...r];
       [copy[i], copy[j]] = [copy[j], copy[i]];
       return copy;
@@ -663,7 +675,7 @@ export default function App() {
         return Math.min(92, Math.max(p + Math.max(1, (92 - p) / 14), floor));
       });
     }, 350);
-    const params = { prompt: prompt.trim(), aspect_ratio: aspect, resolution, refs, seed };
+    const params = { prompt: prompt.trim(), aspect_ratio: aspect, resolution, refs: refs.map((r) => r.url), seed };
     try {
       // Fan out N parallel n=1 requests sharing one AbortController, so one
       // failure (or cancel) never kills the other slots. Single attempt each.
@@ -701,7 +713,7 @@ export default function App() {
           const [imageEnc, thumbEnc, refsEnc] = await Promise.all([
             encryptText(fullUrl),
             encryptText(thumb),
-            Promise.all(refs.map((u) => encryptText(u))),
+            Promise.all(refs.map((r) => encryptText(r.url))),
           ]);
           const gen: Generation = {
             id: uid(),
@@ -715,7 +727,7 @@ export default function App() {
             seed,
             imageUrl: fullUrl,
             thumbUrl: thumb,
-            refUrls: [...refs],
+            refUrls: refs.map((r) => r.url),
           };
           await saveRecord({
             id: gen.id,
@@ -975,7 +987,7 @@ export default function App() {
     setResolution((g.resolution === "2K" ? "2K" : "1K") as Resolution);
     setSeedStr(g.seed !== undefined ? String(g.seed) : "");
     const restored = (g.refUrls ?? []).slice(0, MAX_REFS);
-    setRefs(restored);
+    setRefs(toRefItems(restored));
     setLightbox(null);
     setViewRef(null);
     if (restored.length > 0) {
@@ -1041,7 +1053,7 @@ export default function App() {
       return;
     }
     const add = urls.slice(0, room);
-    setRefs((cur) => [...cur, ...add].slice(0, MAX_REFS));
+    setRefs((cur) => [...cur, ...toRefItems(add)].slice(0, MAX_REFS));
     if (add.length < urls.length) {
       pushToast("info", `Added ${add.length} of ${urls.length} — tray holds ${MAX_REFS}.`);
     } else if (add.length === 1) {
@@ -1521,16 +1533,16 @@ export default function App() {
               </div>
               {refs.length > 0 && (
                 <div className="ref-grid">
-                  {refs.map((u, i) => (
-                    <div className="ref-thumb" key={`ref-${u.length}-${u.slice(22, 46)}`}>
-                      <img src={u} alt={`Reference ${i + 1}`} />
+                  {refs.map((r, i) => (
+                    <div className="ref-thumb" key={r.id}>
+                      <img src={r.url} alt={`Reference ${i + 1}`} />
                       <span className="idx">#{i + 1}</span>
                       <button
                         type="button"
                         className="rm"
                         title="Remove"
                         aria-label={`Remove reference ${i + 1}`}
-                        onClick={() => removeRef(i)}
+                        onClick={() => removeRef(r.id)}
                       >
                         <CloseIcon size={11} />
                       </button>
@@ -1539,7 +1551,7 @@ export default function App() {
                           type="button"
                           title="Move left"
                           aria-label="Move reference left"
-                          onClick={() => moveRef(i, -1)}
+                          onClick={() => moveRef(r.id, -1)}
                         >
                           <ChevronLeftIcon size={12} />
                         </button>
@@ -1547,7 +1559,7 @@ export default function App() {
                           type="button"
                           title="Move right"
                           aria-label="Move reference right"
-                          onClick={() => moveRef(i, 1)}
+                          onClick={() => moveRef(r.id, 1)}
                         >
                           <ChevronRightIcon size={12} />
                         </button>

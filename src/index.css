@@ -322,6 +322,14 @@ select {
 .ref-thumb:hover .mv, .ref-thumb:focus-within .mv { opacity: 1; }
 .ref-thumb .mv button { width: 20px; height: 20px; border-radius: 6px; border: none; background: rgba(18,32,30,0.7); color: #fff; cursor: pointer; display: grid; place-items: center; }
 .ref-thumb .rm:hover, .ref-thumb .mv button:hover { background: var(--teal-dark); }
+.ref-thumb .rm:active, .ref-thumb .mv button:active { background: var(--teal-dark); transform: scale(0.9); }
+/* Touch has no hover: controls must always be visible and finger-sized. */
+@media (hover: none), (pointer: coarse) {
+  .ref-thumb .rm, .ref-thumb .mv { opacity: 1; }
+  .ref-thumb .rm { width: 28px; height: 28px; top: 6px; right: 6px; }
+  .ref-thumb .mv { bottom: 6px; right: 6px; gap: 4px; }
+  .ref-thumb .mv button { width: 28px; height: 28px; }
+}
 
 .lib-link-row { display: flex; margin-top: 8px; }
 .lib-link-row .btn { width: 100%; }
