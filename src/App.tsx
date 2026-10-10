@@ -329,9 +329,14 @@ export default function App() {
 
   /* ----- tabs ----- */
   const [tab, setTab] = useState<TabId>("studio");
+  /* ----- expose active tab for page-scroll locking (studio locks, refs scrolls) ----- */
+  useEffect(() => {
+    document.body.dataset.tab = tab;
+  }, [tab]);
   const [referenceCount, setReferenceCount] = useState(0);
   const [showMoreShapes, setShowMoreShapes] = useState(false);
   const [libMenuOpen, setLibMenuOpen] = useState(false);
+  const libMenuRef = useRef<HTMLDivElement>(null);
   const keyInputRef = useRef<HTMLInputElement>(null);
 
   /* ----- key modal: Esc closes it, the input is focused on open ----- */
@@ -344,6 +349,23 @@ export default function App() {
     keyInputRef.current?.focus();
     return () => window.removeEventListener("keydown", onKey);
   }, [keyModalOpen]);
+
+  /* ----- library menu: click-away + Esc closes it ----- */
+  useEffect(() => {
+    if (!libMenuOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (!libMenuRef.current?.contains(e.target as Node)) setLibMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setLibMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [libMenuOpen]);
 
   const pushToast = useCallback((kind: Toast["kind"], text: string) => {
     const id = ++toastId;
@@ -1526,7 +1548,7 @@ export default function App() {
                   </option>
                 ))}
               </select>
-              <div className="menu-wrap">
+              <div className="menu-wrap" ref={libMenuRef}>
                 <button
                   type="button"
                   className="btn btn-small"
