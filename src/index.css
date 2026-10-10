@@ -146,6 +146,8 @@ textarea::placeholder, input::placeholder { color: #7f8986; }
   letter-spacing: 0.16em; color: var(--muted);
   margin: 2px 12px 8px;
 }
+/* drawer top row (mobile only: drawer covers the wrapped header) */
+.drawer-head { display: none; }
 .drawer-item {
   display: flex; align-items: center; gap: 10px; width: 100%;
   border: 0; border-radius: 10px; background: transparent;
@@ -155,10 +157,10 @@ textarea::placeholder, input::placeholder { color: #7f8986; }
   transition: opacity 0.2s ease, transform 0.26s ease, background-color 0.15s ease, color 0.15s ease;
 }
 .drawer.open .drawer-item { opacity: 1; transform: none; }
-.drawer.open .drawer-item:nth-child(2) {
+.drawer.open .drawer-item:nth-child(3) {
   transition: opacity 0.2s ease 0.06s, transform 0.26s ease 0.06s, background-color 0.15s ease, color 0.15s ease;
 }
-.drawer.open .drawer-item:nth-child(3) {
+.drawer.open .drawer-item:nth-child(4) {
   transition: opacity 0.2s ease 0.12s, transform 0.26s ease 0.12s, background-color 0.15s ease, color 0.15s ease;
 }
 .drawer-item:hover { background: rgba(18, 32, 30, 0.05); color: var(--text); }
@@ -667,6 +669,16 @@ html {
   }
   .peek-bar.peek-hidden { opacity: 0; pointer-events: none; transform: translateY(16px); }
   .sheet-backdrop { display: block; position: fixed; inset: 0; z-index: 80; background: rgba(18, 32, 30, 0.32); }
+  /* mobile: header wraps taller than --header-h, so the drawer goes full-height
+     above it with its own close row instead of clipping the header buttons */
+  .nav-scrim { top: 0; }
+  .drawer { top: 0; z-index: 95; width: min(320px, 88vw); padding-top: 12px; }
+  .drawer-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 2px 4px 10px 12px;
+  }
+  .drawer-brand { font-size: 16px; font-weight: 600; letter-spacing: -0.02em; }
+  .drawer-brand .genie { font-family: var(--font-title); font-style: italic; font-weight: 400; }
   .icon-btn { width: 34px; height: 34px; }
   .chip { height: 34px; }
   .lightbox { grid-template-columns: 1fr; }

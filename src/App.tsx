@@ -1156,6 +1156,20 @@ export default function App() {
         aria-hidden={!navOpen}
         tabIndex={-1}
       >
+        <div className="drawer-head">
+          <span className="drawer-brand" aria-hidden="true">
+            Imagine<span className="genie">Genie</span>
+          </span>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="Close sections menu"
+            onClick={() => setNavOpen(false)}
+            tabIndex={navOpen ? 0 : -1}
+          >
+            <CloseIcon size={15} />
+          </button>
+        </div>
         <p className="drawer-kicker" aria-hidden="true">
           Sections
         </p>
