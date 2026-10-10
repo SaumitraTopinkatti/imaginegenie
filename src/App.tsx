@@ -53,6 +53,7 @@ import {
   UploadIcon,
 } from "./components/icons";
 import ReferencesTab from "./components/ReferencesTab";
+import DenoiseFrame from "./components/DenoiseFrame";
 import logoUrl from "./assets/logo.png";
 
 /* ---------- types & constants ---------- */
@@ -82,9 +83,53 @@ const MAX_REFS = 14;
 const MAX_PROMPT = 4000;
 const MAX_COUNT = 4;
 
+/** In-flight generation slot. The placeholder and its result share one card:
+ *  loading -> (denoise exit) -> revealing (staggered fade-in) -> merged. */
+interface Slot {
+  key: number;
+  gen: Generation | null;
+  revealing: boolean;
+  epoch: number;
+}
+
 function clampCount(n: number): number {
   if (!Number.isFinite(n)) return 1;
   return Math.min(MAX_COUNT, Math.max(1, Math.round(n)));
+}
+
+/* Concept shape picker: 8 visual slots up front, the rest behind "More shapes". */
+const MAIN_ASPECTS = ["auto", "1:1", "4:5", "3:4", "9:16", "16:9", "3:2", "21:9"];
+
+function ratioOf(label: string): number {
+  if (label === "auto") return 1;
+  const parts = label.split(":");
+  const n = Number.parseFloat(parts[0]);
+  const d = Number.parseFloat(parts[1]);
+  if (!Number.isFinite(n) || !Number.isFinite(d) || d === 0) return 1;
+  return n / d;
+}
+
+function shapeBox(label: string): { w: number; h: number; dashed: boolean } {
+  if (label === "auto") return { w: 22, h: 22, dashed: true };
+  const rt = ratioOf(label);
+  const max = 28;
+  const w = rt >= 1 ? max : Math.max(6, Math.round(max * rt));
+  const h = rt >= 1 ? Math.max(6, Math.round(max / rt)) : max;
+  return { w, h, dashed: false };
+}
+
+/* Denoise loader grid: long side 16 cells, short side scaled (concept lib cards). */
+function gridDims(label: string): { cols: number; rows: number } {
+  const rt = ratioOf(label);
+  const long = 16;
+  return rt >= 1
+    ? { cols: long, rows: Math.max(4, Math.round(long / rt)) }
+    : { cols: Math.max(4, Math.round(long * rt)), rows: long };
+}
+
+function aspectCss(label: string): string {
+  if (label === "auto") return "1 / 1";
+  return label.split(":").join(" / ");
 }
 const PRICE_1K = 0.045;
 const PRICE_2K = 0.09;
@@ -129,6 +174,105 @@ function fmtTime(ts: number): string {
 
 let toastId = 0;
 
+interface GenCardProps {
+  g: Generation;
+  /** Staggered reveal after the denoise exit: image -> prompt -> chips -> foot. */
+  reveal?: boolean;
+  onOpen: (g: Generation) => void;
+  onRetry: (g: Generation) => void;
+  onCopy: (url: string) => void;
+  onDownload: (g: Generation) => void;
+  onDelete: (g: Generation) => void;
+}
+
+function GenCard({ g, reveal = false, onOpen, onRetry, onCopy, onDownload, onDelete }: GenCardProps) {
+  const alt = g.prompt.slice(0, 80) || "Generated image";
+  return (
+    <article
+      className={reveal ? "card reveal" : "card"}
+      role="button"
+      tabIndex={0}
+      aria-label={`Open image: ${g.prompt.slice(0, 120) || "Generated image"}`}
+      onClick={() => onOpen(g)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen(g);
+        }
+      }}
+    >
+      <div className={reveal ? "thumb r-img" : "thumb"}>
+        <img src={g.thumbUrl} alt={alt} loading="lazy" />
+        <span className="cost-tag">{fmtCost(g.cost)}</span>
+      </div>
+      <div className="body">
+        <div className={reveal ? "prompt-snippet r-prompt" : "prompt-snippet"}>{g.prompt}</div>
+        <div className={reveal ? "meta r-meta" : "meta"}>
+          <span className="tag">{g.aspectRatio}</span>
+          <span className="tag">{g.resolution}</span>
+          <span className="tag">{g.mediaType.replace("image/", "")}</span>
+          {g.refCount > 0 && (
+            <span className="tag hl">+{g.refCount} ref</span>
+          )}
+        </div>
+        <div className={reveal ? "foot r-foot" : "foot"}>
+          <span className="time">{fmtTime(g.createdAt)}</span>
+          <span className="actions">
+            <button
+              type="button"
+              className="icon-btn"
+              title="Retry with same settings"
+              aria-label="Retry with same settings"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRetry(g);
+              }}
+            >
+              <HistoryIcon size={15} />
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              title="Copy image"
+              aria-label="Copy image"
+              onClick={(e) => {
+                e.stopPropagation();
+                onCopy(g.imageUrl);
+              }}
+            >
+              <CopyIcon size={15} />
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              title="Download PNG"
+              aria-label="Download PNG"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDownload(g);
+              }}
+            >
+              <DownloadIcon size={15} />
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              title="Delete"
+              aria-label="Delete image"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(g);
+              }}
+            >
+              <DeleteIcon size={15} />
+            </button>
+          </span>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 export default function App() {
   /* ----- api key ----- */
   const [apiKey, setApiKey] = useState<string>(() => loadKey());
@@ -153,6 +297,9 @@ export default function App() {
   const [progress, setProgress] = useState(0);
   const [countStr, setCountStr] = useState("1");
   const [error, setError] = useState("");
+  const [slots, setSlots] = useState<Slot[]>([]);
+  const epochRef = useRef(0);
+  const [genElapsed, setGenElapsed] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   const progressTimer = useRef<number | null>(null);
   const progressDone = useRef(0);
@@ -182,6 +329,27 @@ export default function App() {
   /* ----- tabs ----- */
   const [tab, setTab] = useState<TabId>("studio");
   const [referenceCount, setReferenceCount] = useState(0);
+  const [showMoreShapes, setShowMoreShapes] = useState(false);
+  const [libMenuOpen, setLibMenuOpen] = useState(false);
+  const keyInputRef = useRef<HTMLInputElement>(null);
+
+  /** Header key pill: jump to the composer key field and focus it. */
+  const focusKey = () => {
+    if (tab !== "studio") {
+      setTab("studio");
+      window.setTimeout(() => {
+        if (window.matchMedia("(max-width: 900px)").matches) setDrawerOpen(true);
+        keyInputRef.current?.focus();
+        keyInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 60);
+      return;
+    }
+    if (window.matchMedia("(max-width: 900px)").matches) setDrawerOpen(true);
+    requestAnimationFrame(() => {
+      keyInputRef.current?.focus();
+      keyInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  };
 
   const pushToast = useCallback((kind: Toast["kind"], text: string) => {
     const id = ++toastId;
@@ -383,6 +551,18 @@ export default function App() {
     setError("");
     const count = clampCount(Number.parseInt(countStr, 10) || 1);
     setGenerating(true);
+    // One slot per requested image. The placeholder and its result share one
+    // card: saved images attach to a slot and merge in only after the reveal.
+    epochRef.current += 1;
+    const epoch = epochRef.current;
+    setSlots(
+      Array.from({ length: count }, (_, i) => ({
+        key: Date.now() + i,
+        gen: null,
+        revealing: false,
+        epoch,
+      }))
+    );
     setProgress(6);
     progressDone.current = 0;
     const ctrl = new AbortController();
@@ -467,6 +647,15 @@ export default function App() {
             thumbEnc,
             refsEnc,
           });
+          // Hold the result on its slot: it merges into the library only after
+          // the placeholder's exit + reveal sequence finishes in the same card.
+          setSlots((prev) => {
+            const idx = prev.findIndex((s) => s.gen === null);
+            if (idx === -1) return prev;
+            const next = [...prev];
+            next[idx] = { ...next[idx], gen };
+            return next;
+          });
           saved.push(gen);
         } else if (!firstError) {
           firstError =
@@ -479,10 +668,8 @@ export default function App() {
       }
       const aborted = ctrl.signal.aborted;
       setProgress(96);
-      if (saved.length > 0) {
-        setGenerations((g) => [...saved, ...g]);
-        broadcastLibChanged();
-      }
+      // NOTE: no setGenerations here — each saved image merges into the
+      // library from its own slot after the reveal sequence (see slotCleaned).
       if (aborted) {
         setError("Cancelled.");
       } else if (saved.length === 0) {
@@ -606,6 +793,42 @@ export default function App() {
 
   const cancelGen = () => abortRef.current?.abort();
 
+  /* ----- generation elapsed clock for the denoise placeholder caption ----- */
+  useEffect(() => {
+    if (!generating) {
+      setGenElapsed(0);
+      return;
+    }
+    setGenElapsed(0);
+    const t0 = Date.now();
+    const id = window.setInterval(
+      () => setGenElapsed(Math.floor((Date.now() - t0) / 1000)),
+      500
+    );
+    return () => window.clearInterval(id);
+  }, [generating]);
+
+  /* ----- slot lifecycle: loader exit -> staggered reveal -> merge ----- */
+  const slotCleaned = (key: number) => {
+    const s = slots.find((x) => x.key === key);
+    if (!s) return;
+    if (!s.gen) {
+      // Failed or cancelled: no result to reveal, drop the placeholder.
+      setSlots((prev) => prev.filter((x) => x.key !== key));
+      return;
+    }
+    const gen = s.gen;
+    const epoch = s.epoch;
+    setSlots((prev) => prev.map((x) => (x.key === key ? { ...x, revealing: true } : x)));
+    // Merge once the staggered reveal (image -> prompt -> chips -> foot) finishes.
+    window.setTimeout(() => {
+      if (epochRef.current !== epoch) return; // library was cleared meanwhile
+      setGenerations((g) => [gen, ...g]);
+      broadcastLibChanged();
+      setSlots((prev) => prev.filter((x) => x.key !== key));
+    }, 1100);
+  };
+
   const copyImage = useCallback(
     async (dataUrl: string) => {
       try {
@@ -640,6 +863,9 @@ export default function App() {
     setClearing(true);
     setGenerations([]);
     setLightbox(null);
+    // Drop any in-flight slots and invalidate their pending merges.
+    epochRef.current += 1;
+    setSlots([]);
     try {
       await clearRecords();
       // Confirm against storage before claiming empty: another tab may have
@@ -770,6 +996,50 @@ export default function App() {
   const estPrice = resolution === "2K" ? PRICE_2K : PRICE_1K;
   const countNum = clampCount(Number.parseInt(countStr, 10) || 1);
   const estTotal = (estPrice + refs.length * 0.003) * countNum;
+  const moreAspects = useMemo(
+    () => ASPECT_RATIOS.filter((a) => !MAIN_ASPECTS.includes(a)),
+    []
+  );
+  const loaderDims = gridDims(aspect);
+  const loaderAspect = aspectCss(aspect);
+
+  /** One shared card per slot: loader first, then the staggered reveal of its
+   *  own result. The slot merges into the library only after the reveal. */
+  const slotCards = slots.map((s) =>
+    s.gen && s.revealing ? (
+      <GenCard
+        key={`slot-${s.key}`}
+        g={s.gen}
+        reveal
+        onOpen={setLightbox}
+        onRetry={retryGen}
+        onCopy={(url) => void copyImage(url)}
+        onDownload={(gen) =>
+          downloadDataUrl(gen.imageUrl, `imaginegenie-${gen.id.slice(0, 8)}.png`)
+        }
+        onDelete={setPendingDelete}
+      />
+    ) : (
+      <article className="card pending-card" key={`slot-${s.key}`}>
+        <DenoiseFrame
+          seed={s.key}
+          cols={loaderDims.cols}
+          rows={loaderDims.rows}
+          aspect={loaderAspect}
+          done={!generating}
+          onClean={() => slotCleaned(s.key)}
+        />
+        <div className="body">
+          <div className={generating ? "gen-caption" : "gen-caption fading"}>
+            <span className="gen-status">Generating · {genElapsed}s</span>
+            <span className="gen-meta">
+              {aspect} · {resolution}
+            </span>
+          </div>
+        </div>
+      </article>
+    )
+  );
 
   return (
     <div>
@@ -790,52 +1060,46 @@ export default function App() {
             />
             <div>
               <div className="brand-name">
-                Imagine<em>Genie</em>
+                Imagine<span className="genie">Genie</span>
               </div>
-              <div className="brand-sub">AI image studio · single user</div>
+              <div className="brand-sub">AI image studio</div>
             </div>
           </div>
-          <span className="model-badge">
-            <span className="dot" />
-            Seedream 5.0 Pro
-          </span>
-          <div className="header-spacer" />
-          <span className="lock-note">
-            <LockIcon size={13} /> Encrypted library · stays in this browser
-          </span>
-          <div className="session-pill" title="This library totals">
-            <div className="stat">
-              <b>{totals.images}</b>
-              <span>Images</span>
-            </div>
-            <div className="stat">
-              <b>{fmtCost(totals.spend)}</b>
-              <span>Session spend</span>
-            </div>
+          <nav className="nav-pill" aria-label="Sections">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className="tab"
+                aria-current={tab === t.id ? "page" : undefined}
+                onClick={() => setTab(t.id)}
+              >
+                {t.label}
+                {t.id === "refs" && referenceCount > 0 && (
+                  <span className="tab-count">{referenceCount}</span>
+                )}
+              </button>
+            ))}
+          </nav>
+          <div className="header-actions">
+            <span className="model-btn" title={MODEL}>
+              <span className="dot" aria-hidden="true" />
+              <span>Seedream 5.0 Pro</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5D6966" strokeWidth="2" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+            </span>
+            <button
+              type="button"
+              className={apiKey.trim() ? "key-btn" : "key-btn not-set"}
+              onClick={focusKey}
+              title={apiKey.trim() ? "API key connected — edit in composer" : "Add your OpenRouter API key"}
+            >
+              <KeyIcon size={15} />
+              <span className="key-mask">{apiKey.trim() ? maskKey(apiKey.trim()) : "no key"}</span>
+              <span className="key-state">{apiKey.trim() ? "Connected" : "Not set"}</span>
+            </button>
           </div>
         </div>
       </header>
-
-      {/* tabs */}
-      <nav className="tabs-bar" aria-label="Sections">
-        <div className="tabs">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              className="tab"
-              aria-current={tab === t.id ? "page" : undefined}
-              onClick={() => setTab(t.id)}
-            >
-              {t.id === "studio" ? <SparkIcon size={15} /> : <GalleryIcon size={15} />}
-              {t.label}
-              {t.id === "refs" && referenceCount > 0 && (
-                <span className="tab-count">{referenceCount}</span>
-              )}
-            </button>
-          ))}
-        </div>
-      </nav>
 
       {tab === "studio" && (
         <div className="shell">
@@ -873,12 +1137,13 @@ export default function App() {
                 </button>
               </span>
             </div>
-            <h2 className="panel-title">
-              <SparkIcon size={16} /> New image
+            <div className="composer-top">
+            <div className="composer-head">
+            <h2 className="composer-title">
+              New <span className="title-serif">image</span>
             </h2>
-            <p className="panel-desc">
-              {MODEL} · n = 1 · references cost a little extra.
-            </p>
+            <span className="composer-model">{MODEL}</span>
+            </div>
 
             <div className="field">
               <div className="field-label">
@@ -905,21 +1170,59 @@ export default function App() {
 
             <div className="field">
               <div className="field-label">
-                <span>Aspect ratio</span>
+                <span id="shape-label">Shape</span>
+                <span className="count">{aspect}</span>
               </div>
-              <div className="aspect-grid">
-                {ASPECT_RATIOS.map((a) => (
-                  <button
-                    key={a}
-                    type="button"
-                    className={aspect === a ? "chip active" : "chip"}
-                    aria-pressed={aspect === a}
-                    onClick={() => setAspect(a)}
-                  >
-                    {a}
-                  </button>
-                ))}
+              <div className="shape-grid" role="group" aria-labelledby="shape-label">
+                {MAIN_ASPECTS.map((a) => {
+                  const sel = aspect === a;
+                  const box = shapeBox(a);
+                  return (
+                    <button
+                      key={a}
+                      type="button"
+                      className="shape-btn"
+                      aria-pressed={sel}
+                      aria-label={`Aspect ratio ${a}`}
+                      onClick={() => setAspect(a)}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="box"
+                        style={{
+                          width: box.w,
+                          height: box.h,
+                          border: `1.5px ${box.dashed ? "dashed" : "solid"} ${sel ? "#0A7A6B" : "#8E9895"}`,
+                          background: sel ? "#E1F1ED" : "transparent",
+                        }}
+                      />
+                      <span className="lbl">{a}</span>
+                    </button>
+                  );
+                })}
               </div>
+              {showMoreShapes && (
+                <div className="shape-more">
+                  {moreAspects.map((a) => (
+                    <button
+                      key={a}
+                      type="button"
+                      className={aspect === a ? "chip active" : "chip"}
+                      aria-pressed={aspect === a}
+                      onClick={() => setAspect(a)}
+                    >
+                      {a}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button
+                type="button"
+                className="shape-toggle"
+                onClick={() => setShowMoreShapes((s) => !s)}
+              >
+                {showMoreShapes ? "Fewer shapes" : `More shapes (${moreAspects.length})`}
+              </button>
             </div>
 
             <div className="field">
@@ -952,10 +1255,39 @@ export default function App() {
             <div className="row2">
               <div className="field">
                 <div className="field-label">
-                  <span>Seed (optional)</span>
+                  <span id="count-label">Count</span>
+                </div>
+                <div className="stepper" role="group" aria-labelledby="count-label">
+                  <button
+                    type="button"
+                    aria-label="Fewer images"
+                    disabled={countNum <= 1 || clearing}
+                    onClick={() => setCountStr(String(clampCount(countNum - 1)))}
+                  >
+                    −
+                  </button>
+                  <span className="val" aria-live="polite">
+                    {countNum}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="More images"
+                    disabled={countNum >= MAX_COUNT || clearing}
+                    onClick={() => setCountStr(String(clampCount(countNum + 1)))}
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+              <div className="field">
+                <div className="field-label">
+                  <label htmlFor="seed">
+                    Seed <span className="opt">optional</span>
+                  </label>
                 </div>
                 <div className="seed-row">
                   <input
+                    id="seed"
                     type="number"
                     min={0}
                     step={1}
@@ -975,40 +1307,13 @@ export default function App() {
                   </button>
                 </div>
               </div>
-              <div className="field">
-                <div className="field-label">
-                  <span>Count</span>
-                </div>
-                <input
-                  type="number"
-                  min={1}
-                  max={4}
-                  step={1}
-                  value={countStr}
-                  disabled={clearing}
-                  aria-label="Image count"
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v === "") {
-                      setCountStr("");
-                      return;
-                    }
-                    const n = Number(v);
-                    if (Number.isNaN(n)) return;
-                    setCountStr(String(clampCount(n)));
-                  }}
-                  onBlur={() => {
-                    if (countStr === "") setCountStr("1");
-                  }}
-                />
-              </div>
             </div>
 
             <div className="field">
               <div className="field-label">
-                <span>Reference images</span>
+                <span>References</span>
                 <span className="count">
-                  {refs.length}/{MAX_REFS}
+                  {refs.length} / {MAX_REFS} · $0.003 each
                 </span>
               </div>
               <div
@@ -1034,8 +1339,13 @@ export default function App() {
                   void addFiles(e.dataTransfer.files);
                 }}
               >
-                <div className="dz-title">Drop images here, click to browse, or paste from clipboard</div>
-                <div className="dz-sub">PNG · JPG · WebP — resized to max 2048px in browser</div>
+                <span className="dz-ico" aria-hidden="true">
+                  <UploadIcon size={16} />
+                </span>
+                <div>
+                  <div className="dz-title">Drop, browse or paste images</div>
+                  <div className="dz-sub">PNG, JPG or WebP · resized to 2048px max</div>
+                </div>
               </div>
               <input
                 ref={fileInput}
@@ -1048,13 +1358,18 @@ export default function App() {
                   e.target.value = "";
                 }}
               />
-              <div className="lib-link-row">
+              <div className="ref-slots" aria-hidden="true">
+                {Array.from({ length: MAX_REFS }).map((_, i) => (
+                  <span key={i} className={i < refs.length ? "full" : undefined} />
+                ))}
+              </div>
+              <div>
                 <button
                   type="button"
-                  className="btn btn-small btn-ghost"
+                  className="lib-link"
                   onClick={() => setTab("refs")}
                 >
-                  <GalleryIcon size={14} /> Reference library
+                  <GalleryIcon size={14} /> Open reference library
                   {referenceCount > 0 && <span className="tab-count">{referenceCount}</span>}
                 </button>
               </div>
@@ -1104,6 +1419,8 @@ export default function App() {
               </div>
               <div className="key-row">
                 <input
+                  id="api-key"
+                  ref={keyInputRef}
                   type={showKey ? "text" : "password"}
                   aria-label="OpenRouter API key"
                   placeholder="sk-or-v1-…"
@@ -1139,6 +1456,15 @@ export default function App() {
               </div>
             </div>
 
+            </div>
+            <div className="gen-foot">
+            <div className="gen-est">
+              <span className="lbl">Estimate</span>
+              <span className="val">
+                {countNum} × {resolution} {fmtCost(estPrice)} + {refs.length} refs ={" "}
+                {fmtCost(estTotal)}
+              </span>
+            </div>
             <button
               type="button"
               className="gen-btn"
@@ -1147,11 +1473,11 @@ export default function App() {
             >
               {generating ? (
                 <>
-                  <span className="spinner" aria-hidden="true" /> Conjuring… {Math.round(progress)}%
+                  <span className="spinner" aria-hidden="true" /> Working… {Math.round(progress)}%
                 </>
               ) : (
                 <>
-                  <SparkIcon size={18} /> Generate — {fmtCost(estTotal)}
+                  <SparkIcon size={18} /> Generate · {fmtCost(estTotal)}
                 </>
               )}
             </button>
@@ -1179,40 +1505,41 @@ export default function App() {
                 {error}
               </div>
             )}
-            <div className="kbd-hint">
-              <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to generate
+            <span className="kbd-hint">
+              <kbd>Ctrl</kbd> + <kbd>Enter</kbd> from the prompt
+            </span>
             </div>
           </aside>
 
           <main className="main-col">
             {/* metrics */}
             <section className="metrics" aria-label="Session metrics">
-              <div className="metric">
-                <small>Images</small>
-                <b>{totals.images}</b>
-                <span className="hint">in encrypted library</span>
+              <div
+                className="metric main"
+                role="group"
+                aria-label={`${totals.images} images in encrypted library`}
+              >
+                <span className="kicker">IMAGES</span>
+                <div className="row-between">
+                  <span className="big">{totals.images}</span>
+                  <span className="enc">
+                    <LockIcon size={14} /> in encrypted Library
+                  </span>
+                </div>
               </div>
-              <div className="metric">
-                <small>Session spend</small>
-                <b>{fmtCost(totals.spend)}</b>
-                <span className="hint">sum of usage.cost</span>
+              <div className="metric side">
+                <span className="kicker">SESSION SPEND</span>
+                <span>
+                  <span className="mid">{fmtCost(totals.spend)}</span>
+                  <span className="sub">sum of usage.cost</span>
+                </span>
               </div>
-              <div className="metric">
-                <small>Avg / image</small>
-                <b>{fmtCost(totals.avg)}</b>
-                <span className="hint">spend ÷ images</span>
-              </div>
-              <div className="metric">
-                <small>Input refs used</small>
-                <b>{totals.refs}</b>
-                <span className="hint">$0.003 per extra image</span>
-              </div>
-              <div className="metric">
-                <small>Price / image</small>
-                <b>
-                  $0.045 <span className="unit">1K</span>
-                </b>
-                <span className="hint">$0.09 high-res 2K</span>
+              <div className="metric side">
+                <span className="kicker">REFS USED</span>
+                <span>
+                  <span className="mid">{totals.refs}</span>
+                  <span className="sub">$0.003 per extra image</span>
+                </span>
               </div>
             </section>
 
@@ -1226,52 +1553,73 @@ export default function App() {
                 <input
                   type="text"
                   aria-label="Search prompts"
-                  placeholder="Search prompts…"
+                  placeholder="Search prompts"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
               </div>
               <select
+                className="aspect-select"
                 value={aspectFilter}
                 onChange={(e) => setAspectFilter(e.target.value)}
-                style={{ width: "auto" }}
-                title="Filter by aspect"
-                aria-label="Filter by aspect"
+                title="Filter by shape"
+                aria-label="Filter by shape"
               >
-                <option value="all">All aspects</option>
+                <option value="all">All shapes</option>
                 {ASPECT_RATIOS.map((a) => (
                   <option key={a} value={a}>
                     {a}
                   </option>
                 ))}
               </select>
-              <div className="tool-row">
+              <div className="menu-wrap">
                 <button
                   type="button"
-                  className="btn btn-small btn-ghost"
-                  onClick={() => void doExport()}
+                  className="btn btn-small"
+                  aria-expanded={libMenuOpen}
+                  onClick={() => setLibMenuOpen((o) => !o)}
                 >
-                  <DownloadIcon size={14} /> Backup
+                  Library
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5D6966" strokeWidth="2" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
                 </button>
-                <button
-                  type="button"
-                  className="btn btn-small btn-ghost"
-                  disabled={clearing}
-                  onClick={() => importInput.current?.click()}
-                >
-                  <UploadIcon size={14} /> Restore
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-small btn-ghost"
-                  disabled={generations.length === 0 || clearing}
-                  onClick={() => {
-                    setClearText("");
-                    setClearStep(1);
-                  }}
-                >
-                  <DeleteIcon size={14} /> Clear
-                </button>
+                {libMenuOpen && (
+                  <div className="menu-pop" role="menu">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setLibMenuOpen(false);
+                        void doExport();
+                      }}
+                    >
+                      <DownloadIcon size={15} /> Back up library
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setLibMenuOpen(false);
+                        importInput.current?.click();
+                      }}
+                    >
+                      <UploadIcon size={15} /> Restore from backup
+                    </button>
+                    <span className="sep" aria-hidden="true" />
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="danger"
+                      disabled={generations.length === 0 || clearing}
+                      onClick={() => {
+                        setLibMenuOpen(false);
+                        setClearText("");
+                        setClearStep(1);
+                      }}
+                    >
+                      <DeleteIcon size={15} /> Clear library
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
             <input
@@ -1295,144 +1643,83 @@ export default function App() {
                   </div>
                 ))}
               </div>
-            ) : generating && generations.length === 0 ? (
-              <div className="grid">
-                <div className="skel">
-                  <div className="ph" />
-                  <div className="ln" />
-                </div>
+            ) : slots.length > 0 && generations.length === 0 && slots.length === 1 ? (
+              <div className="panel gallery-hero" key={`hero-${slots[0].key}`}>
+                {slots[0].gen && slots[0].revealing ? (
+                  <div className="reveal">
+                    <img
+                      className="r-img hero-img"
+                      src={slots[0].gen.thumbUrl}
+                      alt={slots[0].gen.prompt.slice(0, 80) || "Generated image"}
+                    />
+                    <div className="gen-caption" style={{ marginTop: 12 }}>
+                      <span className="gen-meta r-prompt">{slots[0].gen.prompt}</span>
+                      <span className="gen-meta r-meta">
+                        {slots[0].gen.aspectRatio} · {slots[0].gen.resolution}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <DenoiseFrame
+                      seed={slots[0].key}
+                      cols={loaderDims.cols}
+                      rows={loaderDims.rows}
+                      aspect={loaderAspect}
+                      done={!generating}
+                      onClean={() => slotCleaned(slots[0].key)}
+                    />
+                    <div className={generating ? "gen-caption" : "gen-caption fading"}>
+                      <span className="gen-status">Generating · {genElapsed}s</span>
+                      <span className="gen-meta">
+                        {aspect} · {resolution}
+                      </span>
+                    </div>
+                  </>
+                )}
               </div>
-            ) : filtered.length === 0 ? (
+            ) : filtered.length === 0 && slots.length === 0 ? (
               <div className="empty">
-                <div className="orb-wrap" aria-hidden="true">
-                  <span className="star s1">
-                    <SparkIcon size={13} />
-                  </span>
-                  <span className="star s2">
-                    <SparkIcon size={11} />
-                  </span>
-                  <span className="star s3">
-                    <SparkIcon size={9} />
-                  </span>
-                  <span className="star s4">
-                    <SparkIcon size={10} />
-                  </span>
-                  <img className="hero-logo" src={logoUrl} alt="" />
-                </div>
+                <img className="hero-logo" src={logoUrl} alt="" aria-hidden="true" />
                 <h3>
-                  {generations.length === 0 ? "Your lamp is ready" : "Nothing matches"}
+                  {generations.length === 0 ? (
+                    <>Your <span className="accent">lamp</span> is ready</>
+                  ) : (
+                    "Nothing matches"
+                  )}
                 </h3>
                 <p>
                   {generations.length === 0
-                    ? "Write a prompt on the left, add up to 14 reference images, then hit Generate. Results stay encrypted in this browser."
-                    : "Try a different search or aspect filter."}
+                    ? "Write a prompt, pick a shape and press Generate. Your image appears here."
+                    : "Try a different search or shape filter."}
                 </p>
               </div>
             ) : (
               <div className="grid">
-                {generating && (
-                  <div className="skel">
-                    <div className="ph" />
-                    <div className="ln" />
-                  </div>
-                )}
+                {slotCards}
                 {filtered.map((g) => (
-                  <article
-                    className="card"
+                  <GenCard
                     key={g.id}
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`Open image: ${g.prompt.slice(0, 120) || "Generated image"}`}
-                    onClick={() => setLightbox(g)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setLightbox(g);
-                      }
-                    }}
-                  >
-                    <div className="thumb">
-                      <img src={g.thumbUrl} alt={g.prompt.slice(0, 80) || "Generated image"} loading="lazy" />
-                      <span className="cost-tag">{fmtCost(g.cost)}</span>
-                    </div>
-                    <div className="body">
-                      <div className="prompt-snippet">{g.prompt}</div>
-                      <div className="meta">
-                        <span className="tag">{g.aspectRatio}</span>
-                        <span className="tag">{g.resolution}</span>
-                        <span className="tag">{g.mediaType.replace("image/", "")}</span>
-                        {g.refCount > 0 && (
-                          <span className="tag hl">+{g.refCount} ref</span>
-                        )}
-                      </div>
-                      <div className="foot">
-                        <span className="time">{fmtTime(g.createdAt)}</span>
-                        <span className="actions">
-                          <button
-                            type="button"
-                            className="icon-btn"
-                            title="Retry with same settings"
-                            aria-label="Retry with same settings"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              retryGen(g);
-                            }}
-                          >
-                            <HistoryIcon size={15} />
-                          </button>
-                          <button
-                            type="button"
-                            className="icon-btn"
-                            title="Copy image"
-                            aria-label="Copy image"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void copyImage(g.imageUrl);
-                            }}
-                          >
-                            <CopyIcon size={15} />
-                          </button>
-                          <button
-                            type="button"
-                            className="icon-btn"
-                            title="Download PNG"
-                            aria-label="Download PNG"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              downloadDataUrl(g.imageUrl, `imaginegenie-${g.id.slice(0, 8)}.png`);
-                            }}
-                          >
-                            <DownloadIcon size={15} />
-                          </button>
-                          <button
-                            type="button"
-                            className="icon-btn"
-                            title="Delete"
-                            aria-label="Delete image"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setPendingDelete(g);
-                            }}
-                          >
-                            <DeleteIcon size={15} />
-                          </button>
-                        </span>
-                      </div>
-                    </div>
-                  </article>
+                    g={g}
+                    onOpen={setLightbox}
+                    onRetry={retryGen}
+                    onCopy={(url) => void copyImage(url)}
+                    onDownload={(gen) =>
+                      downloadDataUrl(gen.imageUrl, `imaginegenie-${gen.id.slice(0, 8)}.png`)
+                    }
+                    onDelete={setPendingDelete}
+                  />
                 ))}
               </div>
             )}
           </section>
 
           <footer className="footer">
-          <span>
-            Images encrypted with <code>{alg}</code> in IndexedDB · never written to disk · totals
-            session-only
-          </span>
-          <span>
-            Model <code>{MODEL}</code> · n=1 · data URL refs 0–14
-          </span>
+            <LockIcon size={14} />
+            <span>
+              Images are encrypted with <code>{alg}</code> in IndexedDB, stay in this browser
+              and are never written to disk. Totals reset each session.
+            </span>
           </footer>
         </main>
       </div>
@@ -1440,6 +1727,7 @@ export default function App() {
 
       {/* references */}
       {tab === "refs" && (
+        <div className="shell">
         <main className="main-col">
           <h2 className="visually-hidden">References</h2>
           <ReferencesTab
@@ -1454,6 +1742,7 @@ export default function App() {
             </span>
           </footer>
         </main>
+        </div>
       )}
 
       {/* mobile drawer chrome */}
