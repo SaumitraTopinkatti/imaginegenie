@@ -287,7 +287,7 @@ export default function App() {
 
   /* ----- composer ----- */
   const [prompt, setPrompt] = useState("");
-  const [aspect, setAspect] = useState<string>("16:9");
+  const [aspect, setAspect] = useState<string>("auto");
   const [resolution, setResolution] = useState<Resolution>("1K");
   const [seedStr, setSeedStr] = useState("");
   const [refs, setRefs] = useState<string[]>([]);
