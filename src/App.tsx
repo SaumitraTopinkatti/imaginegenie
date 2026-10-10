@@ -282,6 +282,7 @@ export default function App() {
     kind: "",
   });
   const [testing, setTesting] = useState(false);
+  const [keyModalOpen, setKeyModalOpen] = useState(false);
 
   /* ----- composer ----- */
   const [prompt, setPrompt] = useState("");
@@ -333,23 +334,16 @@ export default function App() {
   const [libMenuOpen, setLibMenuOpen] = useState(false);
   const keyInputRef = useRef<HTMLInputElement>(null);
 
-  /** Header key pill: jump to the composer key field and focus it. */
-  const focusKey = () => {
-    if (tab !== "studio") {
-      setTab("studio");
-      window.setTimeout(() => {
-        if (window.matchMedia("(max-width: 900px)").matches) setDrawerOpen(true);
-        keyInputRef.current?.focus();
-        keyInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      }, 60);
-      return;
-    }
-    if (window.matchMedia("(max-width: 900px)").matches) setDrawerOpen(true);
-    requestAnimationFrame(() => {
-      keyInputRef.current?.focus();
-      keyInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-    });
-  };
+  /* ----- key modal: Esc closes it, the input is focused on open ----- */
+  useEffect(() => {
+    if (!keyModalOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setKeyModalOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    keyInputRef.current?.focus();
+    return () => window.removeEventListener("keydown", onKey);
+  }, [keyModalOpen]);
 
   const pushToast = useCallback((kind: Toast["kind"], text: string) => {
     const id = ++toastId;
@@ -518,8 +512,8 @@ export default function App() {
     setTesting(true);
     setKeyMsg({ text: "", kind: "" });
     try {
-      const msg = await testKey(apiKey.trim());
-      setKeyMsg({ text: msg, kind: "ok" });
+      await testKey(apiKey.trim());
+      setKeyMsg({ text: "Works — your key is valid.", kind: "ok" });
     } catch (e) {
       setKeyMsg({ text: e instanceof Error ? e.message : "Connection failed.", kind: "err" });
     } finally {
@@ -532,7 +526,7 @@ export default function App() {
     if (generating || clearing) return;
     const key = apiKey.trim();
     if (!key) {
-      setError("Add your OpenRouter API key first (left panel).");
+      setError("Add your OpenRouter API key first (key button in the header).");
       return;
     }
     if (!prompt.trim()) {
@@ -1090,8 +1084,12 @@ export default function App() {
             <button
               type="button"
               className={apiKey.trim() ? "key-btn" : "key-btn not-set"}
-              onClick={focusKey}
-              title={apiKey.trim() ? "API key connected — edit in composer" : "Add your OpenRouter API key"}
+              onClick={() => {
+                setKeyMsg({ text: "", kind: "" });
+                setKeyModalOpen(true);
+              }}
+              title={apiKey.trim() ? "API key connected — manage key" : "Add your OpenRouter API key"}
+              aria-haspopup="dialog"
             >
               <KeyIcon size={15} />
               <span className="key-mask">{apiKey.trim() ? maskKey(apiKey.trim()) : "no key"}</span>
@@ -1288,9 +1286,9 @@ export default function App() {
                 <div className="seed-row">
                   <input
                     id="seed"
-                    type="number"
-                    min={0}
-                    step={1}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     aria-label="Seed (optional)"
                     placeholder="Random"
                     value={seedStr}
@@ -1410,50 +1408,6 @@ export default function App() {
                   ))}
                 </div>
               )}
-            </div>
-
-            <div className="field">
-              <div className="field-label">
-                <span>OpenRouter API key</span>
-                {apiKey && <span className="count">{maskKey(apiKey.trim())}</span>}
-              </div>
-              <div className="key-row">
-                <input
-                  id="api-key"
-                  ref={keyInputRef}
-                  type={showKey ? "text" : "password"}
-                  aria-label="OpenRouter API key"
-                  placeholder="sk-or-v1-…"
-                  value={apiKey}
-                  autoComplete="off"
-                  spellCheck={false}
-                  onChange={(e) => setApiKey(e.target.value)}
-                />
-                <button
-                  type="button"
-                  className="eye"
-                  title={showKey ? "Hide key" : "Show key"}
-                  aria-label={showKey ? "Hide key" : "Show key"}
-                  onClick={() => setShowKey((s) => !s)}
-                >
-                  {showKey ? <EyeOffIcon size={17} /> : <EyeIcon size={17} />}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-small"
-                  disabled={testing}
-                  onClick={() => void doTest()}
-                >
-                  {testing ? "…" : "Test"}
-                </button>
-              </div>
-              <div className={keyMsg.kind === "err" ? "key-status err" : "key-status ok"}>
-                {keyMsg.text}
-              </div>
-              <div className="key-meta">
-                <KeyIcon size={13} />
-                <span>Key stays in memory + this tab only.</span>
-              </div>
             </div>
 
             </div>
@@ -2097,6 +2051,69 @@ export default function App() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* api key modal */}
+      {keyModalOpen && (
+        <div className="overlay overlay-top" onClick={() => setKeyModalOpen(false)}>
+          <div
+            className="confirm-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="key-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="key-modal-title">OpenRouter API key</h3>
+            <p>
+              Paste your key to enable generation. It stays in memory + this tab
+              only — never written to disk.
+            </p>
+            <div className="key-row">
+              <input
+                ref={keyInputRef}
+                type={showKey ? "text" : "password"}
+                aria-label="OpenRouter API key"
+                placeholder="sk-or-v1-…"
+                value={apiKey}
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(e) => setApiKey(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void doTest();
+                }}
+              />
+              <button
+                type="button"
+                className="eye"
+                title={showKey ? "Hide key" : "Show key"}
+                aria-label={showKey ? "Hide key" : "Show key"}
+                onClick={() => setShowKey((s) => !s)}
+              >
+                {showKey ? <EyeOffIcon size={17} /> : <EyeIcon size={17} />}
+              </button>
+            </div>
+            <div className={keyMsg.kind === "err" ? "key-status err" : "key-status ok"}>
+              {keyMsg.text}
+            </div>
+            <div className="confirm-actions">
+              <button
+                type="button"
+                className="btn btn-small btn-ghost"
+                onClick={() => setKeyModalOpen(false)}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                className="btn btn-small"
+                disabled={testing}
+                onClick={() => void doTest()}
+              >
+                {testing ? "Testing…" : "Test"}
+              </button>
+            </div>
           </div>
         </div>
       )}

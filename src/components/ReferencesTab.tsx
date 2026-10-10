@@ -99,6 +99,7 @@ export default function ReferencesTab({
   const [sortBy, setSortBy] = useState<SortBy>("newest");
   const [groupFilter, setGroupFilter] = useState("all");
   const [draft, setDraft] = useState<EditDraft | null>(null);
+  const [groupSuggestOpen, setGroupSuggestOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<ReferenceItem | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -400,12 +401,6 @@ export default function ReferencesTab({
           </div>
         </div>
 
-        <datalist id="ref-groups">
-          {groups.map((g) => (
-            <option key={g} value={g} />
-          ))}
-        </datalist>
-
         {loading ? (
           <div className="grid">
             {[0, 1, 2, 3, 4, 5].map((i) => (
@@ -462,19 +457,65 @@ export default function ReferencesTab({
                           value={draft!.description}
                           onChange={(e) => setDraft({ ...draft!, description: e.target.value })}
                         />
-                        <input
-                          type="text"
-                          list="ref-groups"
-                          aria-label="Reference group"
-                          placeholder="Group (optional)"
-                          maxLength={40}
-                          value={draft!.group}
-                          onChange={(e) => setDraft({ ...draft!, group: e.target.value })}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") void saveDraft();
-                            if (e.key === "Escape") setDraft(null);
-                          }}
-                        />
+                        <div className="ref-suggest">
+                          <input
+                            type="text"
+                            role="combobox"
+                            aria-expanded={groupSuggestOpen}
+                            aria-controls="ref-group-list"
+                            aria-autocomplete="list"
+                            aria-label="Reference group"
+                            placeholder="Group (optional)"
+                            maxLength={40}
+                            autoComplete="off"
+                            value={draft!.group}
+                            onChange={(e) => {
+                              setDraft({ ...draft!, group: e.target.value });
+                              setGroupSuggestOpen(true);
+                            }}
+                            onFocus={() => setGroupSuggestOpen(true)}
+                            onBlur={() => setGroupSuggestOpen(false)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") void saveDraft();
+                              if (e.key === "Escape") {
+                                setGroupSuggestOpen(false);
+                                setDraft(null);
+                              }
+                            }}
+                          />
+                          {groupSuggestOpen &&
+                            groups.filter((g) =>
+                              g.toLowerCase().includes(draft!.group.trim().toLowerCase())
+                            ).length > 0 && (
+                              <div
+                                id="ref-group-list"
+                                className="ref-suggest-pop"
+                                role="listbox"
+                                aria-label="Existing groups"
+                              >
+                                {groups
+                                  .filter((g) =>
+                                    g.toLowerCase().includes(draft!.group.trim().toLowerCase())
+                                  )
+                                  .slice(0, 8)
+                                  .map((g) => (
+                                    <button
+                                      key={g}
+                                      type="button"
+                                      role="option"
+                                      aria-selected={draft!.group === g}
+                                      onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        setDraft({ ...draft!, group: g });
+                                        setGroupSuggestOpen(false);
+                                      }}
+                                    >
+                                      {g}
+                                    </button>
+                                  ))}
+                              </div>
+                            )}
+                        </div>
                         <div className="ref-edit-actions">
                           <button
                             type="button"
