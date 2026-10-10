@@ -8,8 +8,9 @@ Single-user AI image studio: write a prompt, optionally attach reference images,
 
 Features:
 
-- Composer with prompt, aspect ratio, resolution, and reference image inputs
+- Composer with model picker, prompt, aspect ratio, resolution, and reference image inputs
 - Gallery with filters and cost tracking
+- References library tab for reusable reference images
 - Lightbox view for generated images
 - Encrypted IndexedDB store for generations and settings (key held in memory)
 
@@ -47,6 +48,8 @@ Prerequisites: Node.js 18+.
 - `npm run dev` — start Vite dev server
 - `npm run build` — typecheck (`tsc --noEmit`) and build to `dist/`
 - `npm run preview` — preview the production build
+- `npm run a11y` — accessibility gate (run after `npm run build`; exits non-zero on serious/critical findings only)
+- `npm run a11y:scan` — accessibility scan only, expects a preview server already running (see `scripts/README.md`)
 
 ## poc.mjs usage
 
