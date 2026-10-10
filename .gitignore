@@ -7,3 +7,6 @@ output*.png
 a11y/axe-results.json
 poc-models-parked.md
 .opencode/
+
+# Local Netlify folder
+.netlify
