@@ -41,11 +41,13 @@ const out = [];
 // State 1: composer (initial load)
 out.push(await scanState(page, "composer"));
 
-// State 2: references tab (switch, scan, switch back)
+// State 2: references tab (open drawer, switch, scan, switch back)
 try {
+  await page.getByRole("button", { name: /sections menu/i }).click();
   await page.getByRole("button", { name: /^References/ }).click();
   await page.locator(".refs-panel").waitFor({ timeout: 5000 });
   out.push(await scanState(page, "references"));
+  await page.getByRole("button", { name: /sections menu/i }).click();
   await page.getByRole("button", { name: /^Studio/ }).click();
   await page.locator("#gallery").waitFor({ timeout: 5000 });
 } catch (e) {

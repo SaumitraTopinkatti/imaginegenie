@@ -44,6 +44,7 @@ import {
   DownloadIcon,
   EyeIcon,
   EyeOffIcon,
+  FolderIcon,
   GalleryIcon,
   HistoryIcon,
   KeyIcon,
@@ -136,9 +137,9 @@ const PRICE_2K = 0.09;
 const KEY_SESSION = "imaginegenie.key";
 
 type TabId = "studio" | "refs";
-const TABS: Array<{ id: TabId; label: string }> = [
-  { id: "studio", label: "Studio" },
-  { id: "refs", label: "References" },
+const TABS: Array<{ id: TabId; label: string; Icon: (props: { size?: number }) => JSX.Element }> = [
+  { id: "studio", label: "Studio", Icon: GalleryIcon },
+  { id: "refs", label: "References", Icon: FolderIcon },
 ];
 
 function loadKey(): string {
@@ -329,6 +330,13 @@ export default function App() {
 
   /* ----- tabs ----- */
   const [tab, setTab] = useState<TabId>("studio");
+  const [navOpen, setNavOpen] = useState(false);
+  const navRef = useRef<HTMLElement>(null);
+  /** Switch sections from the side drawer (drawer closes on pick). */
+  const selectTab = (id: TabId) => {
+    setTab(id);
+    setNavOpen(false);
+  };
   /* ----- expose active tab for page-scroll locking (studio locks, refs scrolls) ----- */
   useEffect(() => {
     document.body.dataset.tab = tab;
@@ -349,6 +357,17 @@ export default function App() {
     keyInputRef.current?.focus();
     return () => window.removeEventListener("keydown", onKey);
   }, [keyModalOpen]);
+
+  /* ----- side drawer: Esc closes it, focus moves in on open ----- */
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setNavOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    navRef.current?.focus({ preventScroll: true });
+    return () => document.removeEventListener("keydown", onKey);
+  }, [navOpen]);
 
   /* ----- library menu: click-away + Esc closes it ----- */
   useEffect(() => {
@@ -1018,6 +1037,10 @@ export default function App() {
   );
   const loaderDims = gridDims(aspect);
   const loaderAspect = aspectCss(aspect);
+  /* Grid result thumbs are fixed squares (.card .thumb aspect-ratio: 1), so the
+   * grid loader frame is square too — otherwise a 16:9 pick renders short and
+   * the card jumps size on reveal. The solo hero keeps the picked ratio. */
+  const slotDims = gridDims("1:1");
 
   /** One shared card per slot: loader first, then the staggered reveal of its
    *  own result. The slot merges into the library only after the reveal. */
@@ -1039,9 +1062,9 @@ export default function App() {
       <article className="card pending-card" key={`slot-${s.key}`}>
         <DenoiseFrame
           seed={s.key}
-          cols={loaderDims.cols}
-          rows={loaderDims.rows}
-          aspect={loaderAspect}
+          cols={slotDims.cols}
+          rows={slotDims.rows}
+          aspect="1 / 1"
           done={!generating}
           onClean={() => slotCleaned(s.key)}
         />
@@ -1066,6 +1089,20 @@ export default function App() {
       <header className="header">
         <h1 className="visually-hidden">ImagineGenie — AI image studio</h1>
         <div className="header-inner">
+          <button
+            type="button"
+            className="nav-toggle"
+            aria-expanded={navOpen}
+            aria-controls="side-drawer"
+            aria-label={navOpen ? "Close sections menu" : "Open sections menu"}
+            onClick={() => setNavOpen((o) => !o)}
+          >
+            <span className="bars" aria-hidden="true">
+              <i />
+              <i />
+              <i />
+            </span>
+          </button>
           <div className="logo">
             <img
               className="logo-img"
@@ -1081,22 +1118,6 @@ export default function App() {
               <div className="brand-sub">AI image studio</div>
             </div>
           </div>
-          <nav className="nav-pill" aria-label="Sections">
-            {TABS.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                className="tab"
-                aria-current={tab === t.id ? "page" : undefined}
-                onClick={() => setTab(t.id)}
-              >
-                {t.label}
-                {t.id === "refs" && referenceCount > 0 && (
-                  <span className="tab-count">{referenceCount}</span>
-                )}
-              </button>
-            ))}
-          </nav>
           <div className="header-actions">
             <span className="model-btn" title={MODEL}>
               <span className="dot" aria-hidden="true" />
@@ -1120,6 +1141,41 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      {/* side drawer: section switching */}
+      <div
+        className={navOpen ? "nav-scrim show" : "nav-scrim"}
+        onClick={() => setNavOpen(false)}
+        aria-hidden="true"
+      />
+      <aside
+        ref={navRef}
+        id="side-drawer"
+        className={navOpen ? "drawer open" : "drawer"}
+        aria-label="Sections"
+        aria-hidden={!navOpen}
+        tabIndex={-1}
+      >
+        <p className="drawer-kicker" aria-hidden="true">
+          Sections
+        </p>
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            className="drawer-item"
+            aria-current={tab === t.id ? "page" : undefined}
+            onClick={() => selectTab(t.id)}
+            tabIndex={navOpen ? 0 : -1}
+          >
+            <t.Icon size={16} />
+            <span>{t.label}</span>
+            {t.id === "refs" && referenceCount > 0 && (
+              <span className="tab-count">{referenceCount}</span>
+            )}
+          </button>
+        ))}
+      </aside>
 
       {tab === "studio" && (
         <div className="shell">
