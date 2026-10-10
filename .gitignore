@@ -6,3 +6,4 @@ output*.png
 *.log
 a11y/axe-results.json
 poc-models-parked.md
+.opencode/
