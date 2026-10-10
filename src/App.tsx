@@ -44,6 +44,7 @@ import {
   DownloadIcon,
   EyeIcon,
   EyeOffIcon,
+  GalleryIcon,
   HistoryIcon,
   KeyIcon,
   LockIcon,
@@ -51,6 +52,7 @@ import {
   SparkIcon,
   UploadIcon,
 } from "./components/icons";
+import ReferencesTab from "./components/ReferencesTab";
 import logoUrl from "./assets/logo.png";
 
 /* ---------- types & constants ---------- */
@@ -87,6 +89,12 @@ function clampCount(n: number): number {
 const PRICE_1K = 0.045;
 const PRICE_2K = 0.09;
 const KEY_SESSION = "imaginegenie.key";
+
+type TabId = "studio" | "refs";
+const TABS: Array<{ id: TabId; label: string }> = [
+  { id: "studio", label: "Studio" },
+  { id: "refs", label: "References" },
+];
 
 function loadKey(): string {
   try {
@@ -170,6 +178,10 @@ export default function App() {
   const touchY = useRef<number | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const importInput = useRef<HTMLInputElement>(null);
+
+  /* ----- tabs ----- */
+  const [tab, setTab] = useState<TabId>("studio");
+  const [referenceCount, setReferenceCount] = useState(0);
 
   const pushToast = useCallback((kind: Toast["kind"], text: string) => {
     const id = ++toastId;
@@ -303,9 +315,10 @@ export default function App() {
     [refs.length, pushToast]
   );
 
-  /* ----- paste images from clipboard straight into references ----- */
+  /* ----- paste images from clipboard straight into the composer tray (Studio tab only) ----- */
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
+      if (tab !== "studio") return; // References tab has its own paste handler for the library
       const files = e.clipboardData?.files;
       if (!files || files.length === 0) return; // text-only paste: stay out entirely
       const images = Array.from(files).filter((f) => f.type.startsWith("image/"));
@@ -314,7 +327,7 @@ export default function App() {
     };
     document.addEventListener("paste", onPaste);
     return () => document.removeEventListener("paste", onPaste);
-  }, [addFiles]);
+  }, [addFiles, tab]);
 
   const removeRef = (i: number) => setRefs((r) => r.filter((_, x) => x !== i));
   const moveRef = (i: number, dir: -1 | 1) =>
@@ -696,7 +709,8 @@ export default function App() {
       }
       pushToast("info", `${generations.length} in library, ${inFile} in file.`);
       const n = await importBackup(text);
-      pushToast("ok", `Imported ${n} record(s). Reloading…`);
+      const extra = n.references > 0 ? ` (${n.references} reference(s))` : "";
+      pushToast("ok", `Imported ${n.records} generation(s)${extra}. Reloading…`);
       await reloadLibrary({ silent: true });
       broadcastLibChanged();
     } catch {
@@ -733,6 +747,18 @@ export default function App() {
     });
   };
 
+  /** From the References tab: load into the composer and jump back to Studio. */
+  const useReference = (imageUrl: string) => {
+    setTab("studio");
+    reuseRefs([imageUrl]);
+  };
+
+  /* switching tabs tears down composer-scoped UI */
+  useEffect(() => {
+    setDrawerOpen(false);
+    setLightbox(null);
+  }, [tab]);
+
   const filtered = useMemo(() => {    const q = search.trim().toLowerCase();
     return generations.filter((g) => {
       if (aspectFilter !== "all" && g.aspectRatio !== aspectFilter) return false;
@@ -747,8 +773,8 @@ export default function App() {
 
   return (
     <div>
-      <a href="#gallery" className="skip-link">
-        Skip to gallery
+      <a href={tab === "studio" ? "#gallery" : "#ref-library"} className="skip-link">
+        {tab === "studio" ? "Skip to gallery" : "Skip to references"}
       </a>
       {/* header */}
       <header className="header">
@@ -790,7 +816,29 @@ export default function App() {
         </div>
       </header>
 
-      <div className="shell">
+      {/* tabs */}
+      <nav className="tabs-bar" aria-label="Sections">
+        <div className="tabs">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className="tab"
+              aria-current={tab === t.id ? "page" : undefined}
+              onClick={() => setTab(t.id)}
+            >
+              {t.id === "studio" ? <SparkIcon size={15} /> : <GalleryIcon size={15} />}
+              {t.label}
+              {t.id === "refs" && referenceCount > 0 && (
+                <span className="tab-count">{referenceCount}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      {tab === "studio" && (
+        <div className="shell">
           {/* composer */}
           <aside
             ref={asideRef}
@@ -1000,6 +1048,16 @@ export default function App() {
                   e.target.value = "";
                 }}
               />
+              <div className="lib-link-row">
+                <button
+                  type="button"
+                  className="btn btn-small btn-ghost"
+                  onClick={() => setTab("refs")}
+                >
+                  <GalleryIcon size={14} /> Reference library
+                  {referenceCount > 0 && <span className="tab-count">{referenceCount}</span>}
+                </button>
+              </div>
               {refs.length > 0 && (
                 <div className="ref-grid">
                   {refs.map((u, i) => (
@@ -1378,24 +1436,47 @@ export default function App() {
           </footer>
         </main>
       </div>
+      )}
+
+      {/* references */}
+      {tab === "refs" && (
+        <main className="main-col">
+          <h2 className="visually-hidden">References</h2>
+          <ReferencesTab
+            onUseReference={useReference}
+            onViewImage={setViewRef}
+            pushToast={pushToast}
+            onCountChange={setReferenceCount}
+          />
+          <footer className="footer">
+            <span id="ref-library">
+              References encrypted with <code>{alg}</code> in IndexedDB · never written to disk
+            </span>
+          </footer>
+        </main>
+      )}
 
       {/* mobile drawer chrome */}
-      <button
-        ref={peekRef}
-        type="button"
-        className={drawerOpen ? "peek-bar peek-hidden" : "peek-bar"}
-        aria-hidden={drawerOpen}
-        tabIndex={drawerOpen ? -1 : 0}
-        onClick={() => setDrawerOpen(true)}
-      >
-        <SparkIcon size={16} /> New image · tap to expand
-      </button>
-      {drawerOpen && (
-        <div
-          className="sheet-backdrop"
-          aria-hidden="true"
-          onClick={() => setDrawerOpen(false)}
-        />
+      {tab === "studio" && (
+        <>
+          <button
+            ref={peekRef}
+            type="button"
+            className={drawerOpen ? "peek-bar peek-hidden" : "peek-bar"}
+            aria-hidden={drawerOpen}
+            tabIndex={drawerOpen ? -1 : 0}
+            onClick={() => setDrawerOpen(true)}
+          >
+            <SparkIcon size={16} /> New image · tap to expand
+          </button>
+          {drawerOpen && (
+            <div
+              className="sheet-backdrop"
+              aria-hidden="true"
+              onClick={() => setDrawerOpen(false)}
+            />
+          )}
+        </>
       )}
 
       {/* lightbox */}

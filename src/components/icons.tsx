@@ -224,6 +224,23 @@ export function ChevronRightIcon(props: IconProps) {
   );
 }
 
+export function EditIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 20h4l10-10-4-4L4 16v4z" />
+      <path d="M14.5 5.5l4 4" />
+    </Svg>
+  );
+}
+
+export function FolderIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M3.5 6.5h5l2 2.5h10v9.5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5V6.5z" />
+    </Svg>
+  );
+}
+
 export function LockIcon(props: IconProps) {
   return (
     <Svg {...props}>

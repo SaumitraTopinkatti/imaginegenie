@@ -5,3 +5,4 @@ output*.png
 .env.local
 *.log
 a11y/axe-results.json
+poc-models-parked.md

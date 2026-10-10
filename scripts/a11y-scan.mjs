@@ -41,7 +41,19 @@ const out = [];
 // State 1: composer (initial load)
 out.push(await scanState(page, "composer"));
 
-// State 2: gallery (if cards exist; else still scan same DOM as gallery state)
+// State 2: references tab (switch, scan, switch back)
+try {
+  await page.getByRole("button", { name: /^References/ }).click();
+  await page.locator(".refs-panel").waitFor({ timeout: 5000 });
+  out.push(await scanState(page, "references"));
+  await page.getByRole("button", { name: /^Studio/ }).click();
+  await page.locator("#gallery").waitFor({ timeout: 5000 });
+} catch (e) {
+  console.log(`[references] not reachable (${e.message?.split("\n")[0]}) — skipped`);
+  out.push({ state: "references", skipped: true, reason: e.message });
+}
+
+// State 3: gallery (if cards exist; else still scan same DOM as gallery state)
 try {
   await page.locator(".card").first().waitFor({ timeout: 5000 });
   out.push(await scanState(page, "gallery"));

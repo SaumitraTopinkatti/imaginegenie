@@ -27,8 +27,23 @@ export interface StoredRecord {
   refsEnc?: EncryptedPayload[];
 }
 
+/**
+ * A saved reference image. Deliberately NOT linked to generations: a
+ * generation stores its own copy of the refs it used, so deleting a
+ * reference never touches anything already generated.
+ */
+export interface StoredReference {
+  id: string;
+  createdAt: number;
+  name: string;
+  description: string;
+  group: string;
+  imageEnc: EncryptedPayload;
+  thumbEnc: EncryptedPayload;
+}
+
 const DB_NAME = "imaginegenie";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const XOR_SECRET = "imaginegenie-studio-v1::genie-lamp";
 
 function bufToB64(buf: ArrayBuffer | Uint8Array): string {
@@ -85,6 +100,9 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains("meta")) {
         db.createObjectStore("meta", { keyPath: "key" });
+      }
+      if (!db.objectStoreNames.contains("references")) {
+        db.createObjectStore("references", { keyPath: "id" });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -255,17 +273,92 @@ export async function clearRecords(): Promise<void> {
   }
 }
 
+/* ---------- reference library (standalone; never linked to generations) ---------- */
+
+export interface DecryptedReference {
+  imageUrl: string;
+  thumbUrl: string;
+}
+
+export async function saveReference(r: StoredReference): Promise<void> {
+  const db = await openDb();
+  try {
+    await idbPut(db, "references", r);
+  } finally {
+    db.close();
+  }
+}
+
+export async function listRawReferences(): Promise<StoredReference[]> {
+  const db = await openDb();
+  try {
+    const all = (await idbGetAll(db, "references")) as StoredReference[];
+    return all.sort((a, b) => b.createdAt - a.createdAt);
+  } finally {
+    db.close();
+  }
+}
+
+export async function deleteReference(id: string): Promise<void> {
+  const db = await openDb();
+  try {
+    await idbDelete(db, "references", id);
+  } finally {
+    db.close();
+  }
+}
+
+export async function clearReferences(): Promise<void> {
+  const db = await openDb();
+  try {
+    await idbClear(db, "references");
+  } finally {
+    db.close();
+  }
+}
+
+/** Decrypt a stored reference. A corrupt thumbnail falls back to the full image. */
+export async function decryptReference(r: StoredReference): Promise<DecryptedReference> {
+  const imageUrl = await decryptText(r.imageEnc);
+  let thumbUrl = imageUrl;
+  try {
+    thumbUrl = await decryptText(r.thumbEnc);
+  } catch {
+    thumbUrl = imageUrl;
+  }
+  return { imageUrl, thumbUrl };
+}
+
 export async function exportBackup(): Promise<string> {
   const records = await listRawRecords();
+  const references = await listRawReferences();
   return JSON.stringify(
-    { app: "imaginegenie", version: 1, exportedAt: new Date().toISOString(), records },
+    {
+      app: "imaginegenie",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      records,
+      references,
+    },
     null,
     2
   );
 }
 
-export async function importBackup(json: string): Promise<number> {  const parsed = JSON.parse(json) as { app?: string; records?: StoredRecord[] };
+/** Imported totals: generations plus references. Throws on invalid payloads. */
+export interface ImportCounts {
+  records: number;
+  references: number;
+}
+
+export async function importBackup(json: string): Promise<ImportCounts> {
+  const parsed = JSON.parse(json) as {
+    app?: string;
+    records?: StoredRecord[];
+    references?: StoredReference[];
+  };
   if (!parsed || !Array.isArray(parsed.records)) throw new Error("Not a valid backup file.");
+  const refs = Array.isArray(parsed.references) ? parsed.references : [];
   const db = await openDb();
   try {
     let n = 0;
@@ -274,7 +367,13 @@ export async function importBackup(json: string): Promise<number> {  const parse
       await idbPut(db, "records", r);
       n++;
     }
-    return n;
+    let rn = 0;
+    for (const r of refs) {
+      if (!r || typeof r.id !== "string" || !r.imageEnc) continue;
+      await idbPut(db, "references", r);
+      rn++;
+    }
+    return { records: n, references: rn };
   } finally {
     db.close();
   }
@@ -287,10 +386,21 @@ export async function importBackup(json: string): Promise<number> {  const parse
 export function countBackupRecords(json: string): number {
   const parsed = JSON.parse(json) as { app?: string; records?: StoredRecord[] };
   if (!parsed || !Array.isArray(parsed.records)) throw new Error("Not a valid backup file.");
-  return parsed.records.filter((r) => r && typeof r.id === "string" && !!r.imageEnc).length;
+  return (
+    parsed.records.filter((r) => r && typeof r.id === "string" && !!r.imageEnc).length +
+    countBackupReferences(json)
+  );
+}
+
+export function countBackupReferences(json: string): number {
+  const parsed = JSON.parse(json) as { references?: StoredReference[] };
+  if (!Array.isArray(parsed.references)) return 0;
+  return parsed.references.filter((r) => r && typeof r.id === "string" && !!r.imageEnc).length;
 }
 
 const LIB_CHANNEL = "imaginegenie-lib";
+/** Identifies this tab so a tab never reloads in response to its own broadcast. */
+const TAB_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
 /**
  * Notify other tabs that the library changed (save/delete/clear/import).
@@ -300,7 +410,7 @@ export function broadcastLibChanged(): void {
   try {
     if (typeof BroadcastChannel === "undefined") return;
     const ch = new BroadcastChannel(LIB_CHANNEL);
-    ch.postMessage({ type: "imaginegenie-lib-changed", at: Date.now() });
+    ch.postMessage({ type: "imaginegenie-lib-changed", at: Date.now(), tabId: TAB_ID });
     ch.close();
   } catch {
     /* unsupported — skip silently */
@@ -309,13 +419,18 @@ export function broadcastLibChanged(): void {
 
 /**
  * Subscribe to library changes from other tabs. Returns an unsubscribe fn.
+ * Messages posted by this tab are ignored (BroadcastChannel delivers to every
+ * other channel object in the same context, including same-page ones).
  * Silent no-op (immediately-returned noop) where unsupported.
  */
 export function subscribeLibChanged(cb: () => void): () => void {
   try {
     if (typeof BroadcastChannel === "undefined") return () => undefined;
     const ch = new BroadcastChannel(LIB_CHANNEL);
-    ch.onmessage = () => cb();
+    ch.onmessage = (e) => {
+      if (e?.data?.tabId === TAB_ID) return;
+      cb();
+    };
     return () => {
       try {
         ch.close();
