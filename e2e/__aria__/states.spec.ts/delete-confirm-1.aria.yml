@@ -1,0 +1,5 @@
+- alertdialog "Delete this image?":
+  - heading "Delete this image?" [level=3]
+  - paragraph: This removes it from the encrypted library.
+  - button "Cancel"
+  - button "Delete"

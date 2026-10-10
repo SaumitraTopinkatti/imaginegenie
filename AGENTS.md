@@ -7,6 +7,7 @@ Single-user AI image studio (Vite + React 18 + TS). Prompt → Seedream 5.0 Pro 
 - `npm run build` — typecheck (`tsc --noEmit`) + build to `dist/`. Always run after edits.
 - `npm run a11y` — accessibility gate. Run **after** `npm run build`; it starts its own `vite preview` on `127.0.0.1:4173`, scans, kills it. Exits non-zero only on serious/critical findings.
 - `npm run a11y:scan` — scan only; expects a preview server already running.
+- `npm run a11y:all` — run-before-merge: `lint:a11y` → `build` → `a11y` → `e2e:build` → `e2e:a11y`. Zero-cost offline harness (in-memory mock store + loopback mock API on 4190/4191). `npm run e2e` = everything; `e2e:keyboard` = dialog contracts only. Never touch port 4173.
 - No test runner, no linter. Gates for "done": `tsc` clean + `build` ok + `a11y` 0 serious/critical.
 - Node 18+.
 

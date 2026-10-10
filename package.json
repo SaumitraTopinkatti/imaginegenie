@@ -10,7 +10,15 @@
     "preview": "vite preview",
     "a11y": "node scripts/a11y-check.mjs",
     "a11y:scan": "node scripts/a11y-scan.mjs",
-    "csp:serve": "node scripts/csp-serve.mjs"
+    "csp:serve": "node scripts/csp-serve.mjs",
+    "lint:a11y": "eslint src --max-warnings 0",
+    "typecheck:e2e": "tsc --noEmit -p e2e/tsconfig.json",
+    "e2e:build": "vite build --mode e2e && node scripts/e2e-sentinel.mjs",
+    "e2e": "npm run build && npm run e2e:build && playwright test",
+    "e2e:a11y": "playwright test e2e/a11y e2e/emulation --project=desktop --project=mobile --project=reduced-motion --project=forced-colors && node scripts/e2e-merge-axe.mjs",
+    "e2e:keyboard": "playwright test e2e/keyboard",
+    "a11y:all": "npm run lint:a11y && npm run build && npm run a11y && npm run e2e:build && npm run e2e:a11y",
+    "mock:api": "node e2e/mock-api/server.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -18,12 +26,17 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "1.64.0",
+    "@types/node": "26.6.5",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.4",
     "axe-core": "^4.13.0",
+    "eslint": "9.39.5",
+    "eslint-plugin-jsx-a11y": "6.10.2",
     "playwright": "^1.64.0",
     "typescript": "^5.5.4",
+    "typescript-eslint": "8.71.1",
     "vite": "^5.4.8",
     "wait-on": "^9.5.1"
   }

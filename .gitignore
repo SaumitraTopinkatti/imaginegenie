@@ -1,10 +1,14 @@
 node_modules/
 dist/
+dist-e2e/
 output*.png
 .env
 .env.local
 *.log
 a11y/axe-results.json
+a11y/states/
+e2e-results/
+playwright-report/
 poc-models-parked.md
 .opencode/
 

@@ -1,0 +1,11 @@
+[
+  {
+    "id": "color-contrast",
+    "reason": "axe cannot compute masked/canvas-adjacent contrast here; tokens verified statically (body/muted 4.9-5.7:1, white-on-teal 5.24:1). Tracked in ACCESSIBILITY-AUDIT.md S6."
+  },
+  {
+    "id": "aria-valid-attr-value",
+    "states": ["lib-menu-open.desktop", "lib-menu-open.mobile"],
+    "reason": "Manual review of an axe incomplete (never a violation): the Library trigger uses aria-haspopup=\"true\", a spec-valid token; its popup is role=group (action buttons, not a menu/listbox), so no more specific token applies and axe cannot verify the popup type statically. Do not retoken to menu without converting the popup pattern."
+  }
+]

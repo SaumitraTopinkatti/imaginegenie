@@ -1,0 +1,25 @@
+- region "Gallery":
+  - textbox "Search prompts"
+  - combobox "Filter by shape":
+    - option "All shapes" [selected]
+    - option "1:1"
+    - option "1:2"
+    - option "2:1"
+    - option "2:3"
+    - option "3:2"
+    - option "3:4"
+    - option "4:3"
+    - option "4:5"
+    - option "5:4"
+    - option /9:\d+/
+    - option /\d+:9/
+    - option /9:\d+\.\d+/
+    - option /\d+\.\d+:9/
+    - option /9:\d+/
+    - option /\d+:9/
+    - option /9:\d+/
+    - option /\d+:9/
+    - option "auto"
+  - button "Library"
+  - heading "Your lamp is ready" [level=2]
+  - paragraph: Write a prompt, pick a shape and press Generate. Your image appears here.

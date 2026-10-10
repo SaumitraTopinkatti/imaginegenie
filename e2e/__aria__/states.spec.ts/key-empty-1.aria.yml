@@ -1,0 +1,11 @@
+- dialog "OpenRouter API key":
+  - heading "OpenRouter API key" [level=3]
+  - paragraph: Paste your key to enable generation. Without remembering it stays in this tab only; remembering stores it encrypted on this device and decrypts it only for viewing and generating.
+  - textbox "OpenRouter API key":
+    - /placeholder: sk-or-v1-…
+  - button "Show key"
+  - status
+  - checkbox "Remember on this device (encrypted)"
+  - text: Remember on this device (encrypted)
+  - button "Close"
+  - button "Test"

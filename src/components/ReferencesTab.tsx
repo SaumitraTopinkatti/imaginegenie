@@ -11,6 +11,7 @@ import {
   uid,
 } from "../lib/secureStore";
 import { copyImageDataUrl, downloadDataUrl, fileToDataUrl, isAccepted, makeThumb } from "../lib/images";
+import Dialog from "./Dialog";
 import {
   CloseIcon,
   CopyIcon,
@@ -100,11 +101,21 @@ export default function ReferencesTab({
   const [groupFilter, setGroupFilter] = useState("all");
   const [draft, setDraft] = useState<EditDraft | null>(null);
   const [groupSuggestOpen, setGroupSuggestOpen] = useState(false);
+  /** Keyboard-highlighted suggestion (ArrowUp/Down + Enter to pick). */
+  const [activeSuggest, setActiveSuggest] = useState(0);
   const [pendingDelete, setPendingDelete] = useState<ReferenceItem | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   /** Ids of stored references that no longer decrypt (key missing). */
   const [unreadableIds, setUnreadableIds] = useState<string[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
+  const editNameRef = useRef<HTMLInputElement>(null);
+  const deleteCancelRef = useRef<HTMLButtonElement>(null);
+  const clearCancelRef = useRef<HTMLButtonElement>(null);
+  /** Edit target whose trigger regains focus after Save/Cancel. */
+  const lastEditedRef = useRef<string | null>(null);
+  /** Draft id already given its open-focus: typing in draft fields must not refocus. */
+  const focusedDraftId = useRef<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -209,18 +220,29 @@ export default function ReferencesTab({
     return () => document.removeEventListener("paste", onPaste);
   }, [addFiles]);
 
-  /* Esc closes the reference dialogs, mirroring the app-level Escape handler */
+  /* Esc closes the reference dialogs: Dialog owns it (trap + layered close) */
+
+  /* Edit open moves focus to the name field; Save/Cancel returns it to Edit.
+     Keyed on the edited id only: every keystroke replaces the draft object,
+     so focusing on the whole object yanked focus back to name per character
+     and made the group combobox unusable for typing. */
   useEffect(() => {
-    if (!pendingDelete && !confirmClear) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      e.stopPropagation();
-      setPendingDelete(null);
-      setConfirmClear(false);
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [pendingDelete, confirmClear]);
+    if (!draft) {
+      const id = lastEditedRef.current;
+      lastEditedRef.current = null;
+      focusedDraftId.current = null;
+      if (id) {
+        document
+          .querySelector<HTMLElement>(`[data-ref-edit="${id}"]`)
+          ?.focus({ preventScroll: true });
+      }
+      return;
+    }
+    if (focusedDraftId.current === draft.id) return;
+    focusedDraftId.current = draft.id;
+    lastEditedRef.current = draft.id;
+    editNameRef.current?.focus({ preventScroll: true });
+  }, [draft]);
 
   const saveDraft = async () => {
     if (!draft) return;
@@ -256,6 +278,8 @@ export default function ReferencesTab({
       pushToast("err", "Delete failed in storage.");
       void reload();
     }
+    // The dialog opener is gone: land on the library section.
+    sectionRef.current?.focus({ preventScroll: true });
   };
 
   const clearAll = async () => {
@@ -271,6 +295,7 @@ export default function ReferencesTab({
       pushToast("err", "Clear failed in storage.");
       void reload();
     }
+    sectionRef.current?.focus({ preventScroll: true });
   };
 
   const copyRef = async (imageUrl: string) => {
@@ -328,20 +353,12 @@ export default function ReferencesTab({
 
   return (
     <>
-      <section className="panel refs-panel" aria-label="Reference library">
+      <section ref={sectionRef} id="ref-library" tabIndex={-1} className="panel refs-panel" aria-label="Reference library">
         <div className="refs-drop">
-          <div
+          <button
+            type="button"
             className={dragOver ? "dropzone over" : "dropzone"}
-            role="button"
-            tabIndex={0}
-            aria-label="Upload reference images to the library"
             onClick={() => fileInput.current?.click()}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                fileInput.current?.click();
-              }
-            }}
             onDragOver={(e) => {
               e.preventDefault();
               setDragOver(true);
@@ -353,13 +370,13 @@ export default function ReferencesTab({
               void addFiles(e.dataTransfer.files);
             }}
           >
-            <div className="dz-title">
+            <span className="dz-title">
               {busy ? "Saving…" : "Drop images here, click to browse, or paste from clipboard"}
-            </div>
-            <div className="dz-sub">
+            </span>
+            <span className="dz-sub">
               PNG · JPG · WebP — resized to max 2048px in browser, then encrypted locally
-            </div>
-          </div>
+            </span>
+          </button>
           <input
             ref={fileInput}
             type="file"
@@ -464,6 +481,13 @@ export default function ReferencesTab({
           <div className="grid">
             {visible.map((r) => {
               const editing = draft?.id === r.id;
+              const suggestions = editing
+                ? groups
+                    .filter((g) =>
+                      g.toLowerCase().includes((draft?.group ?? "").trim().toLowerCase())
+                    )
+                    .slice(0, 8)
+                : [];
               return (
                 <article className={editing ? "card ref-card editing" : "card ref-card"} key={r.id}>
                   <button
@@ -473,13 +497,14 @@ export default function ReferencesTab({
                     aria-label={`View ${r.name} full size`}
                     onClick={() => onViewImage(r.imageUrl)}
                   >
-                    <img src={r.thumbUrl} alt={r.name} loading="lazy" />
+                    <img src={r.thumbUrl} alt="" loading="lazy" />
                     <span className="size-tag">{fmtSize(r.imageUrl)}</span>
                   </button>
                   <div className="body">
                     {editing ? (
                       <div className="ref-edit">
                         <input
+                          ref={editNameRef}
                           type="text"
                           aria-label="Reference name"
                           placeholder="Name"
@@ -505,6 +530,11 @@ export default function ReferencesTab({
                             aria-expanded={groupSuggestOpen}
                             aria-controls="ref-group-list"
                             aria-autocomplete="list"
+                            aria-activedescendant={
+                              groupSuggestOpen && suggestions.length > 0
+                                ? `ref-group-opt-${Math.min(activeSuggest, suggestions.length - 1)}`
+                                : undefined
+                            }
                             aria-label="Reference group"
                             placeholder="Group (optional)"
                             maxLength={40}
@@ -513,49 +543,79 @@ export default function ReferencesTab({
                             onChange={(e) => {
                               setDraft({ ...draft!, group: e.target.value });
                               setGroupSuggestOpen(true);
+                              setActiveSuggest(0);
                             }}
                             onFocus={() => setGroupSuggestOpen(true)}
-                            onBlur={() => setGroupSuggestOpen(false)}
+                            onBlur={(e) => {
+                              // Let focus move into the suggestion list (Tab/mouse).
+                              if (
+                                e.currentTarget
+                                  .closest(".ref-suggest")
+                                  ?.contains(e.relatedTarget as Node)
+                              ) {
+                                return;
+                              }
+                              setGroupSuggestOpen(false);
+                            }}
                             onKeyDown={(e) => {
-                              if (e.key === "Enter") void saveDraft();
-                              if (e.key === "Escape") {
-                                setGroupSuggestOpen(false);
-                                setDraft(null);
+                              if (e.key === "ArrowDown") {
+                                e.preventDefault();
+                                setGroupSuggestOpen(true);
+                                setActiveSuggest((a) =>
+                                  suggestions.length ? (a + 1) % suggestions.length : 0
+                                );
+                              } else if (e.key === "ArrowUp") {
+                                e.preventDefault();
+                                setGroupSuggestOpen(true);
+                                setActiveSuggest((a) =>
+                                  suggestions.length
+                                    ? (a - 1 + suggestions.length) % suggestions.length
+                                    : 0
+                                );
+                              } else if (e.key === "Enter") {
+                                if (groupSuggestOpen && suggestions.length > 0) {
+                                  // Pick the highlighted suggestion, don't save yet.
+                                  e.preventDefault();
+                                  setDraft({
+                                    ...draft!,
+                                    group:
+                                      suggestions[
+                                        Math.min(activeSuggest, suggestions.length - 1)
+                                      ],
+                                  });
+                                  setGroupSuggestOpen(false);
+                                } else void saveDraft();
+                              } else if (e.key === "Escape") {
+                                if (groupSuggestOpen) setGroupSuggestOpen(false);
+                                else setDraft(null);
                               }
                             }}
                           />
-                          {groupSuggestOpen &&
-                            groups.filter((g) =>
-                              g.toLowerCase().includes(draft!.group.trim().toLowerCase())
-                            ).length > 0 && (
-                              <div
-                                id="ref-group-list"
-                                className="ref-suggest-pop"
-                                role="listbox"
-                                aria-label="Existing groups"
-                              >
-                                {groups
-                                  .filter((g) =>
-                                    g.toLowerCase().includes(draft!.group.trim().toLowerCase())
-                                  )
-                                  .slice(0, 8)
-                                  .map((g) => (
-                                    <button
-                                      key={g}
-                                      type="button"
-                                      role="option"
-                                      aria-selected={draft!.group === g}
-                                      onMouseDown={(e) => {
-                                        e.preventDefault();
-                                        setDraft({ ...draft!, group: g });
-                                        setGroupSuggestOpen(false);
-                                      }}
-                                    >
-                                      {g}
-                                    </button>
-                                  ))}
-                              </div>
-                            )}
+                          {groupSuggestOpen && suggestions.length > 0 && (
+                            <div
+                              id="ref-group-list"
+                              className="ref-suggest-pop"
+                              role="listbox"
+                              aria-label="Existing groups"
+                            >
+                              {suggestions.map((g, gi) => (
+                                <button
+                                  key={g}
+                                  id={`ref-group-opt-${gi}`}
+                                  type="button"
+                                  role="option"
+                                  aria-selected={gi === Math.min(activeSuggest, suggestions.length - 1)}
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    setDraft({ ...draft!, group: g });
+                                    setGroupSuggestOpen(false);
+                                  }}
+                                >
+                                  {g}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
                         <div className="ref-edit-actions">
                           <button
@@ -607,6 +667,7 @@ export default function ReferencesTab({
                               className="icon-btn"
                               title="Edit name, description or group"
                               aria-label={`Edit ${r.name}`}
+                              data-ref-edit={r.id}
                               onClick={() =>
                                 setDraft({
                                   id: r.id,
@@ -660,21 +721,21 @@ export default function ReferencesTab({
       </section>
 
       {pendingDelete && (
-        <div className="overlay overlay-top" onClick={() => setPendingDelete(null)}>
-          <div
-            className="confirm-card"
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="ref-del-title"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <Dialog
+          role="alertdialog"
+          labelledBy="ref-del-title"
+          describedBy="ref-del-desc"
+          onClose={() => setPendingDelete(null)}
+          initialFocusRef={deleteCancelRef}
+        >
             <h3 id="ref-del-title">Delete this reference?</h3>
-            <p>
+            <p id="ref-del-desc">
               Removes “{pendingDelete.name}” from the encrypted library. Images already generated
               with it are not affected.
             </p>
             <div className="confirm-actions">
               <button
+                ref={deleteCancelRef}
                 type="button"
                 className="btn btn-small"
                 onClick={() => setPendingDelete(null)}
@@ -689,26 +750,25 @@ export default function ReferencesTab({
                 <DeleteIcon size={14} /> Delete
               </button>
             </div>
-          </div>
-        </div>
+        </Dialog>
       )}
 
       {confirmClear && (
-        <div className="overlay overlay-top" onClick={() => setConfirmClear(false)}>
-          <div
-            className="confirm-card"
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="ref-clear-title"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <Dialog
+          role="alertdialog"
+          labelledBy="ref-clear-title"
+          describedBy="ref-clear-desc"
+          onClose={() => setConfirmClear(false)}
+          initialFocusRef={clearCancelRef}
+        >
             <h3 id="ref-clear-title">Delete all {items.length} references?</h3>
-            <p>
+            <p id="ref-clear-desc">
               This removes every saved reference from the encrypted library. Images already
               generated with them are not affected.
             </p>
             <div className="confirm-actions">
               <button
+                ref={clearCancelRef}
                 type="button"
                 className="btn btn-small"
                 onClick={() => setConfirmClear(false)}
@@ -723,8 +783,7 @@ export default function ReferencesTab({
                 <DeleteIcon size={14} /> Delete all
               </button>
             </div>
-          </div>
-        </div>
+        </Dialog>
       )}
     </>
   );

@@ -1,0 +1,11 @@
+- dialog "Generation details":
+  - img "Lightbox subject"
+  - heading "Generation" [level=3]
+  - text: /Lightbox subject Cost \$\d+\.\d+ Created Oct \d+, \d+:\d+ AM Aspect 1:1 Resolution [\d,.]+[bkmBKM]+ Type image\/png References 0 References 0 · ~0 KB stored No reference images were used\./
+  - button "Copy prompt"
+  - button "Copy image"
+  - button "PNG"
+  - button "Retry"
+  - button "Delete"
+  - button "Close"
+  - text: b64 payload 0 KB · id seed-rec

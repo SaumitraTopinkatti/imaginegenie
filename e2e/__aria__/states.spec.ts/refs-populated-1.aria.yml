@@ -1,0 +1,45 @@
+- region "Reference library":
+  - button "Drop images here, click to browse, or paste from clipboard PNG · JPG · WebP — resized to max 2048px in browser, then encrypted locally"
+  - textbox "Search references":
+    - /placeholder: Search names and descriptions…
+  - combobox "Filter by group":
+    - option "All groups" [selected]
+    - option "Ungrouped"
+    - option "chars"
+    - option "places"
+  - combobox "Sort references":
+    - option "Newest first" [selected]
+    - option "Oldest first"
+    - option "Name A–Z"
+    - option "Name Z–A"
+  - button "Clear"
+  - article:
+    - button "View Teal fox full size": 0.1 KB
+    - text: Teal fox Mascot study chars
+    - button "Use as reference"
+    - text: /Added Oct \d+, \d+:\d+ AM/
+    - button "View Teal fox full size"
+    - button "Edit Teal fox"
+    - button "Copy Teal fox"
+    - button "Download Teal fox"
+    - button "Delete Teal fox"
+  - article:
+    - button "View Harbor dusk full size": 0.1 KB
+    - text: Harbor dusk places
+    - button "Use as reference"
+    - text: /Added Oct \d+, \d+:\d+ AM/
+    - button "View Harbor dusk full size"
+    - button "Edit Harbor dusk"
+    - button "Copy Harbor dusk"
+    - button "Download Harbor dusk"
+    - button "Delete Harbor dusk"
+  - article:
+    - button "View Loose leaf full size": 0.1 KB
+    - text: Loose leaf
+    - button "Use as reference"
+    - text: /Added Oct \d+, \d+:\d+ AM/
+    - button "View Loose leaf full size"
+    - button "Edit Loose leaf"
+    - button "Copy Loose leaf"
+    - button "Download Loose leaf"
+    - button "Delete Loose leaf"

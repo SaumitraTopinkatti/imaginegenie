@@ -16,7 +16,6 @@ export interface DenoiseFrameProps {
   /** When true, the loader finishes: thins out, clears, calls onClean. */
   done?: boolean;
   onClean?: () => void;
-  label?: string;
 }
 
 function hash(x: number, y: number, s: number): number {
@@ -56,7 +55,6 @@ export default function DenoiseFrame({
   aspect = "1 / 1",
   done = false,
   onClean,
-  label = "Image generating",
 }: DenoiseFrameProps) {
   const frameRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -154,12 +152,12 @@ export default function DenoiseFrame({
   }, [seed, cols, rows]);
 
   return (
+    // Decorative motion: the parent announces generation via a live region.
     <div
       ref={frameRef}
       className="denoise-frame"
       style={{ aspectRatio: aspect }}
-      role="img"
-      aria-label={label}
+      aria-hidden="true"
     >
       <canvas ref={canvasRef} />
     </div>

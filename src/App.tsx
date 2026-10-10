@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   ASPECT_RATIOS,
   MODEL,
@@ -61,6 +61,7 @@ import {
 } from "./components/icons";
 import ReferencesTab from "./components/ReferencesTab";
 import DenoiseFrame from "./components/DenoiseFrame";
+import Dialog, { hasOpenDialog } from "./components/Dialog";
 import logoUrl from "./assets/logo.png";
 
 /* ---------- types & constants ---------- */
@@ -84,6 +85,8 @@ interface Toast {
   id: number;
   kind: "ok" | "err" | "info";
   text: string;
+  /** Sticky toasts (errors, one-time warnings) stay until dismissed. */
+  sticky?: boolean;
 }
 
 /** Composer tray entry. The id is a stable per-session key so React never
@@ -182,6 +185,8 @@ let toastId = 0;
 
 interface GenCardProps {
   g: Generation;
+  /** 1-based position in the grid: disambiguates repeated control names. */
+  index: number;
   /** Staggered reveal after the denoise exit: image -> prompt -> chips -> foot. */
   reveal?: boolean;
   onOpen: (g: Generation) => void;
@@ -191,26 +196,21 @@ interface GenCardProps {
   onDelete: (g: Generation) => void;
 }
 
-function GenCard({ g, reveal = false, onOpen, onRetry, onCopy, onDownload, onDelete }: GenCardProps) {
-  const alt = g.prompt.slice(0, 80) || "Generated image";
+/* The card itself is a plain article: one real button (the thumb) opens the
+ * lightbox, action buttons are siblings. No nested interactives, no key
+ * forwarding — inner buttons keep their native Enter/Space behaviour. */
+function GenCard({ g, index, reveal = false, onOpen, onRetry, onCopy, onDownload, onDelete }: GenCardProps) {
   return (
-    <article
-      className={reveal ? "card reveal" : "card"}
-      role="button"
-      tabIndex={0}
-      aria-label={`Open image: ${g.prompt.slice(0, 120) || "Generated image"}`}
-      onClick={() => onOpen(g)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onOpen(g);
-        }
-      }}
-    >
-      <div className={reveal ? "thumb r-img" : "thumb"}>
-        <img src={g.thumbUrl} alt={alt} loading="lazy" />
+    <article className={reveal ? "card reveal" : "card"}>
+      <button
+        type="button"
+        className={reveal ? "thumb r-img" : "thumb"}
+        aria-label={`Open image ${index}: ${g.prompt.slice(0, 120) || "Generated image"}`}
+        onClick={() => onOpen(g)}
+      >
+        <img src={g.thumbUrl} alt="" loading="lazy" />
         <span className="cost-tag">{fmtCost(g.cost)}</span>
-      </div>
+      </button>
       <div className="body">
         <div className={reveal ? "prompt-snippet r-prompt" : "prompt-snippet"}>{g.prompt}</div>
         <div className={reveal ? "meta r-meta" : "meta"}>
@@ -227,8 +227,8 @@ function GenCard({ g, reveal = false, onOpen, onRetry, onCopy, onDownload, onDel
             <button
               type="button"
               className="icon-btn"
-              title="Retry with same settings"
-              aria-label="Retry with same settings"
+              title={`Retry image ${index} with same settings`}
+              aria-label={`Retry image ${index} with same settings`}
               onClick={(e) => {
                 e.stopPropagation();
                 onRetry(g);
@@ -239,8 +239,8 @@ function GenCard({ g, reveal = false, onOpen, onRetry, onCopy, onDownload, onDel
             <button
               type="button"
               className="icon-btn"
-              title="Copy image"
-              aria-label="Copy image"
+              title={`Copy image ${index}`}
+              aria-label={`Copy image ${index}`}
               onClick={(e) => {
                 e.stopPropagation();
                 onCopy(g.imageUrl);
@@ -251,8 +251,8 @@ function GenCard({ g, reveal = false, onOpen, onRetry, onCopy, onDownload, onDel
             <button
               type="button"
               className="icon-btn"
-              title="Download PNG"
-              aria-label="Download PNG"
+              title={`Download image ${index} PNG`}
+              aria-label={`Download image ${index} PNG`}
               onClick={(e) => {
                 e.stopPropagation();
                 onDownload(g);
@@ -263,8 +263,8 @@ function GenCard({ g, reveal = false, onOpen, onRetry, onCopy, onDownload, onDel
             <button
               type="button"
               className="icon-btn"
-              title="Delete"
-              aria-label="Delete image"
+              title={`Delete image ${index}`}
+              aria-label={`Delete image ${index}`}
               onClick={(e) => {
                 e.stopPropagation();
                 onDelete(g);
@@ -362,6 +362,8 @@ export default function App() {
   const [tab, setTab] = useState<TabId>("studio");
   const [navOpen, setNavOpen] = useState(false);
   const navRef = useRef<HTMLElement>(null);
+  const navToggleRef = useRef<HTMLButtonElement>(null);
+  const galleryRef = useRef<HTMLElement>(null);
   /** Switch sections from the side drawer (drawer closes on pick). */
   const selectTab = (id: TabId) => {
     setTab(id);
@@ -370,11 +372,28 @@ export default function App() {
   /* ----- expose active tab for page-scroll locking (studio locks, refs scrolls) ----- */
   useEffect(() => {
     document.body.dataset.tab = tab;
+    document.title =
+      tab === "studio" ? "ImagineGenie — Studio" : "ImagineGenie — References";
+  }, [tab]);
+  /* ----- land focus in the new section after switch (never steal it on load) ----- */
+  const firstTabRender = useRef(true);
+  useEffect(() => {
+    if (firstTabRender.current) {
+      firstTabRender.current = false;
+      return;
+    }
+    const el =
+      tab === "studio"
+        ? galleryRef.current
+        : (document.getElementById("ref-library") as HTMLElement | null);
+    el?.focus({ preventScroll: true });
   }, [tab]);
   const [referenceCount, setReferenceCount] = useState(0);
   const [showMoreShapes, setShowMoreShapes] = useState(false);
   const [libMenuOpen, setLibMenuOpen] = useState(false);
   const libMenuRef = useRef<HTMLDivElement>(null);
+  const libMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const menuListRef = useRef<HTMLDivElement>(null);
   const keyInputRef = useRef<HTMLInputElement>(null);
 
   /* ----- key resolution: working copy first, encrypted store on demand.
@@ -408,16 +427,7 @@ export default function App() {
     if (rememberKey) setApiKey("");
   }, [rememberKey]);
 
-  /* ----- key modal: Esc closes it, the input is focused on open ----- */
-  useEffect(() => {
-    if (!keyModalOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeKeyModal();
-    };
-    window.addEventListener("keydown", onKey);
-    keyInputRef.current?.focus();
-    return () => window.removeEventListener("keydown", onKey);
-  }, [keyModalOpen, closeKeyModal]);
+  /* ----- key modal: Dialog moves focus in, traps Tab, layered-Esc, returns focus ----- */
 
   /* ----- side drawer: Esc closes it, focus moves in on open ----- */
   useEffect(() => {
@@ -427,17 +437,29 @@ export default function App() {
     };
     document.addEventListener("keydown", onKey);
     navRef.current?.focus({ preventScroll: true });
-    return () => document.removeEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      // Return focus to the hamburger when the drawer owned it (section
+      // switches move focus to the section instead via selectTab).
+      const active = document.activeElement;
+      if (active && navRef.current?.contains(active)) {
+        navToggleRef.current?.focus({ preventScroll: true });
+      }
+    };
   }, [navOpen]);
 
-  /* ----- library menu: click-away + Esc closes it ----- */
+  /* ----- library menu: click-away + Esc closes it, focus in on open ----- */
   useEffect(() => {
     if (!libMenuOpen) return;
+    menuListRef.current?.querySelector("button")?.focus({ preventScroll: true });
     const onDown = (e: PointerEvent) => {
       if (!libMenuRef.current?.contains(e.target as Node)) setLibMenuOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setLibMenuOpen(false);
+      if (e.key === "Escape") {
+        setLibMenuOpen(false);
+        libMenuButtonRef.current?.focus({ preventScroll: true });
+      }
     };
     document.addEventListener("pointerdown", onDown);
     document.addEventListener("keydown", onKey);
@@ -447,10 +469,41 @@ export default function App() {
     };
   }, [libMenuOpen]);
 
-  const pushToast = useCallback((kind: Toast["kind"], text: string) => {
+  /** Arrow/Home/End navigation inside the Library disclosure list. */
+  const onMenuKey = (e: ReactKeyboardEvent) => {
+    const items = Array.from(
+      menuListRef.current?.querySelectorAll<HTMLButtonElement>("button:not([disabled])") ?? []
+    );
+    if (items.length === 0) return;
+    const i = items.indexOf(document.activeElement as HTMLButtonElement);
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      (items[i + 1] ?? items[0]).focus();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      (items[i - 1] ?? items[items.length - 1]).focus();
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      items[0].focus();
+    } else if (e.key === "End") {
+      e.preventDefault();
+      items[items.length - 1].focus();
+    }
+  };
+
+  const pushToast = useCallback((kind: Toast["kind"], text: string, opts?: { sticky?: boolean }) => {
     const id = ++toastId;
-    setToasts((t) => [...t.slice(-3), { id, kind, text }]);
-    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4200);
+    // Errors and one-time warnings persist until dismissed; confirmations
+    // auto-dismiss. Hover/focus pause is unnecessary for sticky items.
+    const sticky = opts?.sticky ?? kind === "err";
+    setToasts((t) => [...t.slice(-3), { id, kind, text, sticky }]);
+    if (!sticky) {
+      window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4200);
+    }
+  }, []);
+
+  const dismissToast = useCallback((id: number) => {
+    setToasts((t) => t.filter((x) => x.id !== id));
   }, []);
 
   /* ----- totals (derived in-memory; the old write-only localStorage copy is gone) ----- */
@@ -865,10 +918,15 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        // Paid action: only from inside the composer, matching the hint text.
+        const t = e.target as HTMLElement | null;
+        if (!t || typeof t.closest !== "function" || !t.closest(".composer")) return;
         e.preventDefault();
         generateRef.current();
       }
       if (e.key === "Escape") {
+        // A dialog owns Escape while open (Dialog closes the topmost layer).
+        if (hasOpenDialog()) return;
         setLightbox(null);
         setDrawerOpen(false);
       }
@@ -900,7 +958,7 @@ export default function App() {
       if (e.key !== "Tab" || !aside) return;
       const items = Array.from(
         aside.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]), [contenteditable="true"]'
         )
       );
       if (items.length === 0) return;
@@ -922,50 +980,11 @@ export default function App() {
     };
   }, [drawerOpen]);
 
-  /* ----- delete confirmation: Esc cancels, focus starts on Cancel ----- */
-  useEffect(() => {
-    if (!pendingDelete) return;
-    cancelRef.current?.focus({ preventScroll: true });
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        setPendingDelete(null);
-      }
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [pendingDelete]);
+  /* ----- delete confirmation: Dialog handles focus, trap, layered Esc ----- */
 
-  /* ----- backup dialog: Esc cancels, focus starts on the passphrase ----- */
-  useEffect(() => {
-    if (!backupDialog) return;
-    backupFirstInput.current?.focus({ preventScroll: true });
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        abortBackupDialog();
-      }
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-    // Deps: dialog open/close only. Keystrokes must NOT re-run this —
-    // re-focusing here would yank focus out of the confirm field.
-  }, [backupDialog]);
+  /* ----- backup dialog: Dialog handles focus, trap, layered Esc ----- */
 
-  /* ----- clear-all double confirm: Esc cancels, focus follows the step ----- */
-  useEffect(() => {
-    if (clearStep === 0) return;
-    if (clearStep === 1) clearCancelRef.current?.focus({ preventScroll: true });
-    else clearInputRef.current?.focus({ preventScroll: true });
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        abortClear();
-      }
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [clearStep]);
+  /* ----- clear-all double confirm: Dialog keyed per step follows focus ----- */
 
   const cancelGen = () => abortRef.current?.abort();
 
@@ -1039,6 +1058,8 @@ export default function App() {
     } catch {
       pushToast("err", "Delete failed in storage.");
     }
+    // The opener (the card's Delete button) is gone: land on the gallery.
+    galleryRef.current?.focus({ preventScroll: true });
   };
 
   const abortClear = () => {
@@ -1092,6 +1113,8 @@ export default function App() {
       await reloadLibrary({ silent: true });
     } finally {
       setClearing(false);
+      // The dialog opener is gone: land on the gallery.
+      galleryRef.current?.focus({ preventScroll: true });
     }
   };
 
@@ -1142,7 +1165,7 @@ export default function App() {
       const json = await exportBackup(backupPass);
       downloadBackupFile(json);
       setBackupDialog(null);
-      pushToast("ok", "Passphrase-protected backup downloaded. Keep the passphrase — it can't be recovered.");
+      pushToast("ok", "Passphrase-protected backup downloaded. Keep the passphrase — it can't be recovered.", { sticky: true });
     } catch (e) {
       setBackupErr(e instanceof Error ? e.message : "Export failed.");
     } finally {
@@ -1266,6 +1289,10 @@ export default function App() {
 
   const estPrice = resolution === "2K" ? PRICE_2K : PRICE_1K;
   const countNum = clampCount(Number.parseInt(countStr, 10) || 1);
+  /** Live seed validity (mirrors the generate-time check for AT). */
+  const seedInvalid =
+    seedStr.trim() !== "" &&
+    (!Number.isInteger(Number(seedStr.trim())) || Number(seedStr.trim()) < 0);
   const estTotal = (estPrice + refs.length * 0.003) * countNum;
   const moreAspects = useMemo(
     () => ASPECT_RATIOS.filter((a) => !MAIN_ASPECTS.includes(a)),
@@ -1280,11 +1307,12 @@ export default function App() {
 
   /** One shared card per slot: loader first, then the staggered reveal of its
    *  own result. The slot merges into the library only after the reveal. */
-  const slotCards = slots.map((s) =>
+  const slotCards = slots.map((s, i) =>
     s.gen && s.revealing ? (
       <GenCard
         key={`slot-${s.key}`}
         g={s.gen}
+        index={generations.length + i + 1}
         reveal
         onOpen={setLightbox}
         onRetry={retryGen}
@@ -1295,7 +1323,7 @@ export default function App() {
         onDelete={setPendingDelete}
       />
     ) : (
-      <article className="card pending-card" key={`slot-${s.key}`}>
+      <div className="card pending-card" key={`slot-${s.key}`}>
         <DenoiseFrame
           seed={s.key}
           cols={slotDims.cols}
@@ -1312,7 +1340,7 @@ export default function App() {
             </span>
           </div>
         </div>
-      </article>
+      </div>
     )
   );
 
@@ -1326,6 +1354,7 @@ export default function App() {
         <h1 className="visually-hidden">ImagineGenie — AI image studio</h1>
         <div className="header-inner">
           <button
+            ref={navToggleRef}
             type="button"
             className="nav-toggle"
             aria-expanded={navOpen}
@@ -1343,7 +1372,7 @@ export default function App() {
             <img
               className="logo-img"
               src={logoUrl}
-              alt="ImagineGenie logo"
+              alt=""
               width={36}
               height={36}
             />
@@ -1365,7 +1394,8 @@ export default function App() {
               aria-haspopup="dialog"
             >
               <KeyIcon size={15} />
-              <span className="key-mask">{apiKey.trim() ? maskKey(apiKey.trim()) : rememberKey ? "••••••" : "no key"}</span>
+              <span className="visually-hidden">OpenRouter API key: </span>
+              <span className="key-mask" aria-hidden="true">{apiKey.trim() ? maskKey(apiKey.trim()) : rememberKey ? "••••••" : "no key"}</span>
               <span className="key-state">{apiKey.trim() || rememberKey ? "Connected" : "Not set"}</span>
             </button>
           </div>
@@ -1387,7 +1417,7 @@ export default function App() {
         onClick={() => setNavOpen(false)}
         aria-hidden="true"
       />
-      <aside
+      <nav
         ref={navRef}
         id="side-drawer"
         className={navOpen ? "drawer open" : "drawer"}
@@ -1428,7 +1458,7 @@ export default function App() {
             )}
           </button>
         ))}
-      </aside>
+      </nav>
 
       {tab === "studio" && (
         <div className="shell">
@@ -1436,8 +1466,17 @@ export default function App() {
           <aside
             ref={asideRef}
             className={drawerOpen ? "panel composer open" : "panel composer"}
-            aria-label="Composer"
+            aria-label="Image composer"
           >
+            {/* dialog semantics live on this neutral wrapper (display:contents,
+                so flex layout is unchanged): aside cannot carry role=dialog,
+                and the same node must never remount between sheet states. */}
+            <div
+              className="sheet-dialog"
+              {...(drawerOpen
+                ? { role: "dialog", "aria-modal": true, "aria-label": "Image composer" }
+                : {})}
+            >
             {/* mobile sheet grab handle */}
             <div
               className="sheet-grab"
@@ -1497,6 +1536,8 @@ export default function App() {
               <textarea
                 className="prompt"
                 aria-label="Prompt"
+                aria-required="true"
+                aria-describedby={error ? "gen-error" : undefined}
                 placeholder="A cozy cabin in a snowy forest at dusk, warm windows, illustration…"
                 value={prompt}
                 maxLength={MAX_PROMPT}
@@ -1563,16 +1604,16 @@ export default function App() {
 
             <div className="field">
               <div className="field-label">
-                <span>Resolution</span>
+                <span id="res-label">Resolution</span>
               </div>
-              <div className="seg">
+              <div className="seg" role="group" aria-labelledby="res-label">
                 <button
                   type="button"
                   className={resolution === "1K" ? "active" : ""}
                   aria-pressed={resolution === "1K"}
                   onClick={() => setResolution("1K")}
                 >
-                  1K<small>$0.045 / image</small>
+                  1K <small>$0.045 / image</small>
                 </button>
                 <button
                   type="button"
@@ -1580,7 +1621,7 @@ export default function App() {
                   aria-pressed={resolution === "2K"}
                   onClick={() => setResolution("2K")}
                 >
-                  2K<small>$0.09 / image</small>
+                  2K <small>$0.09 / image</small>
                 </button>
               </div>
               <div className="price-hint">
@@ -1628,6 +1669,8 @@ export default function App() {
                     inputMode="numeric"
                     pattern="[0-9]*"
                     aria-label="Seed (optional)"
+                    aria-invalid={seedInvalid || undefined}
+                    aria-describedby={error ? "gen-error" : undefined}
                     placeholder="Random"
                     value={seedStr}
                     onChange={(e) => setSeedStr(e.target.value)}
@@ -1652,18 +1695,10 @@ export default function App() {
                   {refs.length} / {MAX_REFS} · $0.003 each
                 </span>
               </div>
-              <div
+              <button
+                type="button"
                 className={dragOver ? "dropzone over" : "dropzone"}
-                role="button"
-                tabIndex={0}
-                aria-label="Upload reference images"
                 onClick={() => fileInput.current?.click()}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    fileInput.current?.click();
-                  }
-                }}
                 onDragOver={(e) => {
                   e.preventDefault();
                   setDragOver(true);
@@ -1678,11 +1713,11 @@ export default function App() {
                 <span className="dz-ico" aria-hidden="true">
                   <UploadIcon size={16} />
                 </span>
-                <div>
-                  <div className="dz-title">Drop, browse or paste images</div>
-                  <div className="dz-sub">PNG, JPG or WebP · resized to 2048px max</div>
-                </div>
-              </div>
+                <span>
+                  <span className="dz-title">Drop, browse or paste images</span>
+                  <span className="dz-sub">PNG, JPG or WebP · resized to 2048px max</span>
+                </span>
+              </button>
               <input
                 ref={fileInput}
                 type="file"
@@ -1794,13 +1829,20 @@ export default function App() {
               </>
             )}
             {error && (
-              <div className="error-box" role="alert">
+              <div className="error-box" role="alert" id="gen-error">
                 {error}
               </div>
+            )}
+            {/* single polite announcement for generation start (loaders are decorative) */}
+            {generating && (
+              <span className="visually-hidden" role="status">
+                Generating {countNum} image{countNum === 1 ? "" : "s"}…
+              </span>
             )}
             <span className="kbd-hint">
               <kbd>Ctrl</kbd> + <kbd>Enter</kbd> from the prompt
             </span>
+            </div>
             </div>
           </aside>
 
@@ -1837,7 +1879,7 @@ export default function App() {
             </section>
 
             {/* gallery */}
-          <section id="gallery" className="panel gallery" aria-label="Gallery">
+          <section id="gallery" ref={galleryRef} tabIndex={-1} className="panel gallery" aria-label="Gallery">
             <div className="gallery-bar">
               <div className="search">
                 <span className="icon">
@@ -1867,19 +1909,28 @@ export default function App() {
               </select>
               <div className="menu-wrap" ref={libMenuRef}>
                 <button
+                  ref={libMenuButtonRef}
                   type="button"
                   className="btn btn-small"
                   aria-expanded={libMenuOpen}
+                  aria-controls={libMenuOpen ? "lib-menu" : undefined}
+                  aria-haspopup="true"
                   onClick={() => setLibMenuOpen((o) => !o)}
                 >
                   Library
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5D6966" strokeWidth="2" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
                 </button>
                 {libMenuOpen && (
-                  <div className="menu-pop" role="menu">
+                  <div
+                    id="lib-menu"
+                    ref={menuListRef}
+                    className="menu-pop"
+                    role="group"
+                    aria-label="Library actions"
+                    onKeyDown={onMenuKey}
+                  >
                     <button
                       type="button"
-                      role="menuitem"
                       onClick={() => {
                         setLibMenuOpen(false);
                         openBackupExport();
@@ -1889,9 +1940,11 @@ export default function App() {
                     </button>
                     <button
                       type="button"
-                      role="menuitem"
                       onClick={() => {
                         setLibMenuOpen(false);
+                        // The native picker opens no dialog: if it is
+                        // cancelled, focus must still land on the trigger.
+                        libMenuButtonRef.current?.focus({ preventScroll: true });
                         importInput.current?.click();
                       }}
                     >
@@ -1900,7 +1953,6 @@ export default function App() {
                     <span className="sep" aria-hidden="true" />
                     <button
                       type="button"
-                      role="menuitem"
                       className="danger"
                       disabled={(generations.length === 0 && unreadableIds.length === 0) || clearing}
                       onClick={() => {
@@ -1990,13 +2042,13 @@ export default function App() {
             ) : filtered.length === 0 && slots.length === 0 ? (
               <div className="empty">
                 <img className="hero-logo" src={logoUrl} alt="" aria-hidden="true" />
-                <h3>
+                <h2 className="empty-title">
                   {generations.length === 0 ? (
                     <>Your <span className="accent">lamp</span> is ready</>
                   ) : (
                     "Nothing matches"
                   )}
-                </h3>
+                </h2>
                 <p>
                   {generations.length === 0
                     ? "Write a prompt, pick a shape and press Generate. Your image appears here."
@@ -2006,10 +2058,11 @@ export default function App() {
             ) : (
               <div className="grid">
                 {slotCards}
-                {visible.map((g) => (
+                {visible.map((g, i) => (
                   <GenCard
                     key={g.id}
                     g={g}
+                    index={slots.length + i + 1}
                     onOpen={setLightbox}
                     onRetry={retryGen}
                     onCopy={(url) => void copyImage(url)}
@@ -2046,7 +2099,7 @@ export default function App() {
             onCountChange={setReferenceCount}
           />
           <footer className="footer">
-            <span id="ref-library">
+            <span>
               References encrypted with <code>{alg}</code> in IndexedDB · never written to disk
             </span>
           </footer>
@@ -2079,14 +2132,12 @@ export default function App() {
 
       {/* lightbox */}
       {lightbox && (
-        <div className="overlay" onClick={() => setLightbox(null)}>
-          <div
-            className="lightbox"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Generation details"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <Dialog
+          label="Generation details"
+          onClose={() => setLightbox(null)}
+          overlayClassName="overlay"
+          panelClassName="lightbox"
+        >
             <img
               className="full"
               src={lightbox.imageUrl}
@@ -2244,20 +2295,16 @@ export default function App() {
                 {lightbox.id.slice(0, 8)}
               </div>
             </div>
-          </div>
-        </div>
+        </Dialog>
       )}
 
       {/* reference full view */}
       {viewRef && (
-        <div className="overlay overlay-top" onClick={() => setViewRef(null)}>
-          <div
-            className="ref-view"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Reference image"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <Dialog
+          label="Reference image"
+          onClose={() => setViewRef(null)}
+          panelClassName="ref-view"
+        >
             <img src={viewRef} alt="Reference full size" />
             <div className="ref-view-bar">
               <button
@@ -2282,22 +2329,20 @@ export default function App() {
                 <CloseIcon size={14} /> Close
               </button>
             </div>
-          </div>
-        </div>
+        </Dialog>
       )}
 
       {/* delete confirmation */}
       {pendingDelete && (
-        <div className="overlay overlay-top" onClick={() => setPendingDelete(null)}>
-          <div
-            className="confirm-card"
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="del-title"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <Dialog
+          role="alertdialog"
+          labelledBy="del-title"
+          describedBy="del-desc"
+          onClose={() => setPendingDelete(null)}
+          initialFocusRef={cancelRef}
+        >
             <h3 id="del-title">Delete this image?</h3>
-            <p>This removes it from the encrypted library.</p>
+            <p id="del-desc">This removes it from the encrypted library.</p>
             <div className="confirm-actions">
               <button
                 ref={cancelRef}
@@ -2319,24 +2364,26 @@ export default function App() {
                 <DeleteIcon size={14} /> Delete
               </button>
             </div>
-          </div>
-        </div>
+        </Dialog>
       )}
 
       {/* clear-all double confirmation */}
       {clearStep > 0 && (
-        <div className="overlay overlay-top" onClick={abortClear}>
-          <div
-            className="confirm-card"
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby={clearStep === 1 ? "clear-title-1" : "clear-title-2"}
-            onClick={(e) => e.stopPropagation()}
-          >
+        <Dialog
+          key={clearStep}
+          role="alertdialog"
+          labelledBy={clearStep === 1 ? "clear-title-1" : "clear-title-2"}
+          describedBy={clearStep === 1 ? "clear-desc-1" : "clear-desc-2"}
+          onClose={abortClear}
+          initialFocusRef={clearStep === 1 ? clearCancelRef : clearInputRef}
+          // Launched from the Library menu, which closes (unmounting the
+          // item) before this opens: return to the stable menu trigger.
+          returnFocusRef={libMenuButtonRef}
+        >
               {clearStep === 1 ? (
               <>
                 <h3 id="clear-title-1">Delete all {generations.length + unreadableIds.length} images?</h3>
-                <p>This removes everything from the encrypted library.</p>
+                <p id="clear-desc-1">This removes everything from the encrypted library.</p>
                 <div className="confirm-actions">
                   <button
                     ref={clearCancelRef}
@@ -2361,7 +2408,7 @@ export default function App() {
             ) : (
               <>
                 <h3 id="clear-title-2">Are you absolutely sure?</h3>
-                <p>
+                <p id="clear-desc-2">
                   This cannot be undone. All {generations.length + unreadableIds.length} images will be
                   permanently deleted. Type <code>DELETE</code> to confirm.
                 </p>
@@ -2406,20 +2453,16 @@ export default function App() {
                 </div>
               </>
             )}
-          </div>
-        </div>
+        </Dialog>
       )}
 
       {/* api key modal */}
       {keyModalOpen && (
-        <div className="overlay overlay-top" onClick={() => closeKeyModal()}>
-          <div
-            className="confirm-card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="key-modal-title"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <Dialog
+          labelledBy="key-modal-title"
+          onClose={closeKeyModal}
+          initialFocusRef={keyInputRef}
+        >
             <h3 id="key-modal-title">OpenRouter API key</h3>
             <p>
               Paste your key to enable generation. Without remembering it stays
@@ -2450,7 +2493,7 @@ export default function App() {
                 {showKey ? <EyeOffIcon size={17} /> : <EyeIcon size={17} />}
               </button>
             </div>
-            <div className={keyMsg.kind === "err" ? "key-status err" : "key-status ok"}>
+            <div className={keyMsg.kind === "err" ? "key-status err" : "key-status ok"} role={keyMsg.kind === "err" ? "alert" : "status"}>
               {keyMsg.text}
             </div>
             <label className="remember-row">
@@ -2482,20 +2525,20 @@ export default function App() {
                 {testing ? "Testing…" : "Test"}
               </button>
             </div>
-          </div>
-        </div>
+        </Dialog>
       )}
 
       {/* passphrase backup / restore */}
       {backupDialog && (
-        <div className="overlay overlay-top" onClick={abortBackupDialog}>
-          <div
-            className="confirm-card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="backup-title"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <Dialog
+          key={backupDialog.mode}
+          labelledBy="backup-title"
+          onClose={abortBackupDialog}
+          initialFocusRef={backupFirstInput}
+          // Menu-launched like clear-all: return to the menu trigger, which
+          // stays mounted while the menu itself closes on item click.
+          returnFocusRef={libMenuButtonRef}
+        >
             {backupDialog.mode === "export" ? (
               <>
                 <h3 id="backup-title">Protect backup</h3>
@@ -2647,15 +2690,18 @@ export default function App() {
                 </div>
               </>
             )}
-          </div>
-        </div>
+        </Dialog>
       )}
 
-      {/* toasts */}
+      {/* toasts: polite status for confirmations, alert + sticky for errors */}
       <div className="toasts" role="status" aria-live="polite">
         {toasts.map((t) => (
-          <div key={t.id} className={`toast ${t.kind === "info" ? "" : t.kind}`}>
-            <span className="t-ico">
+          <div
+            key={t.id}
+            className={`toast ${t.kind === "info" ? "" : t.kind}`}
+            {...(t.kind === "err" ? { role: "alert" } : {})}
+          >
+            <span className="t-ico" aria-hidden="true">
               {t.kind === "ok" ? (
                 <CheckIcon size={15} />
               ) : t.kind === "err" ? (
@@ -2665,6 +2711,16 @@ export default function App() {
               )}
             </span>
             <span>{t.text}</span>
+            {t.sticky && (
+              <button
+                type="button"
+                className="icon-btn toast-x"
+                aria-label="Dismiss notification"
+                onClick={() => dismissToast(t.id)}
+              >
+                <CloseIcon size={13} />
+              </button>
+            )}
           </div>
         ))}
       </div>
