@@ -102,12 +102,15 @@ export default function ReferencesTab({
   const [groupSuggestOpen, setGroupSuggestOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<ReferenceItem | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  /** Ids of stored references that no longer decrypt (key missing). */
+  const [unreadableIds, setUnreadableIds] = useState<string[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const reload = useCallback(async () => {
     try {
       const raw = await listRawReferences();
       const out: ReferenceItem[] = [];
+      const bad: string[] = [];
       for (const r of raw) {
         try {
           const { imageUrl, thumbUrl } = await decryptReference(r);
@@ -121,10 +124,12 @@ export default function ReferencesTab({
             thumbUrl,
           });
         } catch {
-          /* skip corrupt reference */
+          // Undecryptable (key missing or corrupt): counted, never silent.
+          if (typeof r?.id === "string") bad.push(r.id);
         }
       }
       setItems(out);
+      setUnreadableIds(bad);
       return out.length;
     } catch {
       pushToast("err", "Could not open the encrypted reference library.");
@@ -277,6 +282,26 @@ export default function ReferencesTab({
     }
   };
 
+  /** Drop stored references that no longer decrypt (key missing or corrupt). */
+  const deleteUnreadable = async () => {
+    const ids = unreadableIds;
+    if (ids.length === 0) return;
+    try {
+      for (const id of ids) {
+        try {
+          await deleteReference(id);
+        } catch {
+          /* keep going; reload reconciles */
+        }
+      }
+      await reload();
+      broadcastLibChanged();
+      pushToast("ok", `Removed ${ids.length} unreadable item(s).`);
+    } catch {
+      pushToast("err", "Could not remove unreadable items.");
+    }
+  };
+
   const groups = useMemo(() => {
     const set = new Set<string>();
     for (const i of items) if (i.group) set.add(i.group);
@@ -393,13 +418,29 @@ export default function ReferencesTab({
             <button
               type="button"
               className="btn btn-small btn-ghost"
-              disabled={items.length === 0 || busy}
+              disabled={(items.length === 0 && unreadableIds.length === 0) || busy}
               onClick={() => setConfirmClear(true)}
             >
               <DeleteIcon size={14} /> Clear
             </button>
           </div>
         </div>
+
+        {!loading && unreadableIds.length > 0 && (
+          <div className="unreadable-bar" role="alert">
+            <span>
+              {unreadableIds.length} item{unreadableIds.length === 1 ? "" : "s"} can&apos;t be
+              decrypted (key missing).
+            </span>
+            <button
+              type="button"
+              className="btn btn-small btn-danger"
+              onClick={() => void deleteUnreadable()}
+            >
+              <DeleteIcon size={14} /> Delete them
+            </button>
+          </div>
+        )}
 
         {loading ? (
           <div className="grid">

@@ -17,10 +17,11 @@ import {
   makeThumb,
 } from "./lib/images";
 import {
+  BACKUP_MIN_PASSPHRASE,
   broadcastLibChanged,
   clearApiKeyPayload,
   clearRecords,
-  countBackupRecords,
+  cryptoDegraded,
   cryptoMode,
   decryptRecord,
   decryptText,
@@ -31,6 +32,7 @@ import {
   initCrypto,
   listRawRecords,
   loadApiKeyPayload,
+  peekBackup,
   saveApiKeyPayload,
   saveRecord,
   subscribeLibChanged,
@@ -309,6 +311,11 @@ export default function App() {
   const [error, setError] = useState("");
   const [slots, setSlots] = useState<Slot[]>([]);
   const epochRef = useRef(0);
+  /** Synchronous in-flight guard: React state hasn't flushed when a second
+   *  trigger (double-click, key repeat, duplicate keydown) lands. */
+  const genLock = useRef(false);
+  /** Monotonic slot-key suffix so two batches never share a React key. */
+  const slotSeq = useRef(0);
   const [genElapsed, setGenElapsed] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   const progressTimer = useRef<number | null>(null);
@@ -318,6 +325,10 @@ export default function App() {
   const [generations, setGenerations] = useState<Generation[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [alg, setAlg] = useState("…");
+  /** Non-empty when AES is unavailable: writes + generation stay disabled. */
+  const [degraded, setDegraded] = useState("");
+  /** Ids of stored rows that no longer decrypt (key missing): deletable. */
+  const [unreadableIds, setUnreadableIds] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [aspectFilter, setAspectFilter] = useState("all");
   const [lightbox, setLightbox] = useState<Generation | null>(null);
@@ -326,6 +337,17 @@ export default function App() {
   const [clearStep, setClearStep] = useState<0 | 1 | 2>(0);
   const [clearText, setClearText] = useState("");
   const [clearing, setClearing] = useState(false);
+  /* ----- passphrase backup dialog ----- */
+  const [backupDialog, setBackupDialog] = useState<
+    | null
+    | { mode: "export" }
+    | { mode: "import"; text: string; hasKeyWrap: boolean; inFile: number }
+  >(null);
+  const [backupPass, setBackupPass] = useState("");
+  const [backupConfirm, setBackupConfirm] = useState("");
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupErr, setBackupErr] = useState("");
+  const backupFirstInput = useRef<HTMLInputElement>(null);
   const [viewRef, setViewRef] = useState<string | null>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const clearCancelRef = useRef<HTMLButtonElement>(null);
@@ -449,6 +471,7 @@ export default function App() {
       try {
         const raw = await listRawRecords();
         const out: Generation[] = [];
+        const bad: string[] = [];
         for (const r of raw) {
           try {
             const { imageUrl, thumbUrl, refUrls } = await decryptRecord(r);
@@ -467,10 +490,12 @@ export default function App() {
               refUrls,
             });
           } catch {
-            /* skip corrupt record */
+            // Undecryptable (key missing or corrupt): counted, never silent.
+            if (typeof r?.id === "string") bad.push(r.id);
           }
         }
         setGenerations(out);
+        setUnreadableIds(bad);
         return out.length;
       } catch {
         if (!opts?.silent) pushToast("err", "Could not open encrypted library.");
@@ -487,6 +512,7 @@ export default function App() {
       const mode = await initCrypto();
       if (cancelled) return;
       setAlg(mode === "AES-GCM-256" ? "AES-GCM-256" : cryptoMode());
+      setDegraded(cryptoDegraded());
       await reloadLibrary({ silent: true });
       if (cancelled) return;
       // Opt-in remembered key: flag it. Plaintext is decrypted on demand
@@ -510,6 +536,8 @@ export default function App() {
      store of record when the working copy is dropped on modal close). ----- */
   useEffect(() => {
     if (!rememberKey || !apiKey.trim()) return;
+    // Degraded (no AES): refuse the encrypted copy — the key stays tab-only.
+    if (cryptoMode() !== "AES-GCM-256") return;
     let cancelled = false;
     void (async () => {
       try {
@@ -625,174 +653,210 @@ export default function App() {
 
   /* ----- generate ----- */
   const doGenerate = useCallback(async () => {
-    if (generating || clearing) return;
-    const key = await resolveKey();
-    if (!key) {
-      setError("Add your OpenRouter API key first (key button in the header).");
-      return;
-    }
-    if (!prompt.trim()) {
-      setError("Describe the image first.");
-      return;
-    }
-    let seed: number | undefined;
-    if (seedStr.trim() !== "") {
-      const n = Number(seedStr.trim());
-      if (!Number.isInteger(n) || n < 0) {
-        setError("Seed must be a whole number (0 or above).");
+    if (genLock.current) return;
+    genLock.current = true;
+    try {
+      if (generating || clearing) return;
+      const key = await resolveKey();
+      if (!key) {
+        setError("Add your OpenRouter API key first (key button in the header).");
         return;
       }
-      seed = n;
-    }
-    setError("");
-    const count = clampCount(Number.parseInt(countStr, 10) || 1);
-    setGenerating(true);
-    // One slot per requested image. The placeholder and its result share one
-    // card: saved images attach to a slot and merge in only after the reveal.
-    epochRef.current += 1;
-    const epoch = epochRef.current;
-    setSlots(
-      Array.from({ length: count }, (_, i) => ({
-        key: Date.now() + i,
-        gen: null,
-        revealing: false,
-        epoch,
-      }))
-    );
-    setProgress(6);
-    progressDone.current = 0;
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    if (progressTimer.current) window.clearInterval(progressTimer.current);
-    progressTimer.current = window.setInterval(() => {
-      setProgress((p) => {
-        if (p >= 92) {
-          // Hold at ~92% while the API is still working; completions push the floor up.
-          const floor = 6 + (progressDone.current / count) * 86;
-          return Math.max(p, Math.min(floor, 92));
+      if (!prompt.trim()) {
+        setError("Describe the image first.");
+        return;
+      }
+      // Degraded crypto: block BEFORE any POST — paid pixels that can't be
+      // saved must never be requested.
+      if (cryptoMode() !== "AES-GCM-256") {
+        setError("Encryption unavailable — generation is disabled. No request was sent.");
+        return;
+      }
+      let seed: number | undefined;
+      if (seedStr.trim() !== "") {
+        const n = Number(seedStr.trim());
+        if (!Number.isInteger(n) || n < 0) {
+          setError("Seed must be a whole number (0 or above).");
+          return;
         }
-        const floor = 6 + (progressDone.current / count) * 86;
-        return Math.min(92, Math.max(p + Math.max(1, (92 - p) / 14), floor));
+        seed = n;
+      }
+      setError("");
+      const count = clampCount(Number.parseInt(countStr, 10) || 1);
+      setGenerating(true);
+      // One slot per requested image. The placeholder and its result share one
+      // card: saved images attach to a slot and merge in only after the reveal.
+      // Slots append so a batch started during a previous reveal never drops
+      // the earlier pending merges. epoch only moves in clearAll.
+      const epoch = epochRef.current;
+      const batch = Array.from({ length: count }, () => {
+        slotSeq.current += 1;
+        return {
+          key: Date.now() * 1000 + slotSeq.current,
+          gen: null as Generation | null,
+          revealing: false,
+          epoch,
+        };
       });
-    }, 350);
-    const params = { prompt: prompt.trim(), aspect_ratio: aspect, resolution, refs: refs.map((r) => r.url), seed };
-    try {
-      // Fan out N parallel n=1 requests sharing one AbortController, so one
-      // failure (or cancel) never kills the other slots. Single attempt each.
-      const bump = () => {
-        progressDone.current += 1;
-        const done = progressDone.current;
-        setProgress((p) => Math.max(p, 6 + (done / count) * 86));
-      };
-      const outcomes = await Promise.allSettled(
-        Array.from({ length: count }, () =>
-          generateImage(key, params, ctrl.signal).then(
-            (v) => {
-              bump();
-              return v;
-            },
-            (e) => {
-              bump();
-              throw e;
-            }
-          )
-        )
-      );
-      const saved: Generation[] = [];
-      let firstError = "";
-      for (const o of outcomes) {
-        if (o.status === "fulfilled") {
-          const res = o.value;
-          const fullUrl = b64ToDataUrl(res.b64, res.mediaType);
-          let thumb = fullUrl;
-          try {
-            thumb = await makeThumb(fullUrl);
-          } catch {
-            thumb = fullUrl;
+      setSlots((prev) => [...prev, ...batch]);
+      setProgress(6);
+      progressDone.current = 0;
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
+      if (progressTimer.current) window.clearInterval(progressTimer.current);
+      progressTimer.current = window.setInterval(() => {
+        setProgress((p) => {
+          if (p >= 92) {
+            // Hold at ~92% while the API is still working; completions push the floor up.
+            const floor = 6 + (progressDone.current / count) * 86;
+            return Math.max(p, Math.min(floor, 92));
           }
-          const [imageEnc, thumbEnc, refsEnc] = await Promise.all([
-            encryptText(fullUrl),
-            encryptText(thumb),
-            Promise.all(refs.map((r) => encryptText(r.url))),
-          ]);
-          const gen: Generation = {
-            id: uid(),
-            createdAt: Date.now(),
-            prompt: prompt.trim(),
-            aspectRatio: aspect,
-            resolution,
-            cost: res.cost,
-            mediaType: res.mediaType,
-            refCount: refs.length,
-            seed,
-            imageUrl: fullUrl,
-            thumbUrl: thumb,
-            refUrls: refs.map((r) => r.url),
-          };
-          await saveRecord({
-            id: gen.id,
-            createdAt: gen.createdAt,
-            prompt: gen.prompt,
-            aspectRatio: gen.aspectRatio,
-            resolution: gen.resolution,
-            cost: gen.cost,
-            mediaType: gen.mediaType,
-            refCount: gen.refCount,
-            seed: gen.seed,
-            imageEnc,
-            thumbEnc,
-            refsEnc,
-          });
-          // Hold the result on its slot: it merges into the library only after
-          // the placeholder's exit + reveal sequence finishes in the same card.
-          setSlots((prev) => {
-            const idx = prev.findIndex((s) => s.gen === null);
-            if (idx === -1) return prev;
-            const next = [...prev];
-            next[idx] = { ...next[idx], gen };
-            return next;
-          });
-          saved.push(gen);
-        } else if (!firstError) {
+          const floor = 6 + (progressDone.current / count) * 86;
+          return Math.min(92, Math.max(p + Math.max(1, (92 - p) / 14), floor));
+        });
+      }, 350);
+      const params = { prompt: prompt.trim(), aspect_ratio: aspect, resolution, refs: refs.map((r) => r.url), seed };
+      try {
+        // Fan out N parallel n=1 requests sharing one AbortController, so one
+        // failure (or cancel) never kills the other slots. Single attempt each.
+        // Each result persists as soon as its own request resolves.
+        const bump = () => {
+          progressDone.current += 1;
+          const done = progressDone.current;
+          setProgress((p) => Math.max(p, 6 + (done / count) * 86));
+        };
+        const saved: Generation[] = [];
+        let generated = 0;
+        let reqFailed = 0;
+        let saveFailed = 0;
+        let firstError = "";
+        const noteError = (e: unknown) => {
+          if (firstError) return;
           firstError =
-            o.reason instanceof DOMException && o.reason.name === "AbortError"
+            e instanceof DOMException && e.name === "AbortError"
               ? ""
-              : o.reason instanceof Error
-                ? o.reason.message
+              : e instanceof Error
+                ? e.message
                 : "Generation failed.";
+        };
+        const runOne = async (slotKey: number): Promise<void> => {
+          let res: Awaited<ReturnType<typeof generateImage>>;
+          try {
+            res = await generateImage(key, params, ctrl.signal).then(
+              (v) => {
+                bump();
+                return v;
+              },
+              (e) => {
+                bump();
+                throw e;
+              }
+            );
+          } catch (e) {
+            if (e instanceof DOMException && e.name === "AbortError") return;
+            reqFailed += 1;
+            noteError(e);
+            return;
+          }
+          generated += 1;
+          try {
+            const fullUrl = b64ToDataUrl(res.b64, res.mediaType);
+            let thumb = fullUrl;
+            try {
+              thumb = await makeThumb(fullUrl);
+            } catch {
+              thumb = fullUrl;
+            }
+            const [imageEnc, thumbEnc, refsEnc] = await Promise.all([
+              encryptText(fullUrl),
+              encryptText(thumb),
+              Promise.all(refs.map((r) => encryptText(r.url))),
+            ]);
+            const gen: Generation = {
+              id: uid(),
+              createdAt: Date.now(),
+              prompt: prompt.trim(),
+              aspectRatio: aspect,
+              resolution,
+              cost: res.cost,
+              mediaType: res.mediaType,
+              refCount: refs.length,
+              seed,
+              imageUrl: fullUrl,
+              thumbUrl: thumb,
+              refUrls: refs.map((r) => r.url),
+            };
+            await saveRecord({
+              id: gen.id,
+              createdAt: gen.createdAt,
+              prompt: gen.prompt,
+              aspectRatio: gen.aspectRatio,
+              resolution: gen.resolution,
+              cost: gen.cost,
+              mediaType: gen.mediaType,
+              refCount: gen.refCount,
+              seed: gen.seed,
+              imageEnc,
+              thumbEnc,
+              refsEnc,
+            });
+            // Hold the result on its slot: it merges into the library only after
+            // the placeholder's exit + reveal sequence finishes in the same card.
+            // Matched by slot key (not first-empty) so parallel saves never
+            // swap results between cards.
+            setSlots((prev) => {
+              if (!prev.some((s) => s.key === slotKey)) return prev;
+              return prev.map((s) => (s.key === slotKey ? { ...s, gen } : s));
+            });
+            saved.push(gen);
+          } catch (e) {
+            saveFailed += 1;
+            if (!firstError) {
+              firstError = e instanceof Error ? e.message : "Could not save image.";
+            }
+          }
+        };
+        await Promise.all(batch.map((s) => runOne(s.key)));
+        const aborted = ctrl.signal.aborted;
+        setProgress(96);
+        // NOTE: no setGenerations here — each saved image merges into the
+        // library from its own slot after the reveal sequence (see slotCleaned).
+        if (aborted) {
+          setError(
+            saved.length > 0 ? `Cancelled — saved ${saved.length} of ${count}.` : "Cancelled."
+          );
+        } else if (saved.length === 0) {
+          setError(
+            generated > 0
+              ? `Generated ${generated} of ${count}, saved 0. ${firstError || "Generation failed."}`
+              : firstError || "Generation failed."
+          );
+        } else if (saved.length < count) {
+          pushToast(
+            "err",
+            `Generated ${generated} of ${count} · saved ${saved.length} · failed ${count - saved.length} (${reqFailed} request, ${saveFailed} save): ${firstError || "unknown error"}`
+          );
+        } else {
+          setProgress(100);
+          const total = saved.reduce((s, g) => s + g.cost, 0);
+          pushToast("ok", `Image ready — ${fmtCost(total)} this call.`);
+          if (window.matchMedia("(max-width: 900px)").matches) setDrawerOpen(false);
         }
-      }
-      const aborted = ctrl.signal.aborted;
-      setProgress(96);
-      // NOTE: no setGenerations here — each saved image merges into the
-      // library from its own slot after the reveal sequence (see slotCleaned).
-      if (aborted) {
-        setError("Cancelled.");
-      } else if (saved.length === 0) {
-        setError(firstError || "Generation failed.");
-      } else if (saved.length < count) {
-        pushToast(
-          "err",
-          `Saved ${saved.length} of ${count} images. ${count - saved.length} failed: ${firstError || "unknown error"}`
-        );
-      } else {
-        setProgress(100);
-        const total = saved.reduce((s, g) => s + g.cost, 0);
-        pushToast("ok", `Image ready — ${fmtCost(total)} this call.`);
-        if (window.matchMedia("(max-width: 900px)").matches) setDrawerOpen(false);
-      }
-    } catch (e) {
-      if (e instanceof DOMException && e.name === "AbortError") {
-        setError("Cancelled.");
-      } else {
-        setError(e instanceof Error ? e.message : "Generation failed.");
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") {
+          setError("Cancelled.");
+        } else {
+          setError(e instanceof Error ? e.message : "Generation failed.");
+        }
+      } finally {
+        if (progressTimer.current) window.clearInterval(progressTimer.current);
+        progressTimer.current = null;
+        abortRef.current = null;
+        setGenerating(false);
+        window.setTimeout(() => setProgress(0), 900);
       }
     } finally {
-      if (progressTimer.current) window.clearInterval(progressTimer.current);
-      progressTimer.current = null;
-      abortRef.current = null;
-      setGenerating(false);
-      window.setTimeout(() => setProgress(0), 900);
+      genLock.current = false;
     }
   }, [generating, clearing, resolveKey, prompt, aspect, resolution, refs, seedStr, countStr, pushToast]);
 
@@ -872,6 +936,22 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [pendingDelete]);
 
+  /* ----- backup dialog: Esc cancels, focus starts on the passphrase ----- */
+  useEffect(() => {
+    if (!backupDialog) return;
+    backupFirstInput.current?.focus({ preventScroll: true });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        abortBackupDialog();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+    // Deps: dialog open/close only. Keystrokes must NOT re-run this —
+    // re-focusing here would yank focus out of the confirm field.
+  }, [backupDialog]);
+
   /* ----- clear-all double confirm: Esc cancels, focus follows the step ----- */
   useEffect(() => {
     if (clearStep === 0) return;
@@ -888,6 +968,16 @@ export default function App() {
   }, [clearStep]);
 
   const cancelGen = () => abortRef.current?.abort();
+
+  /* ----- warn on tab close/reload while paid results may still be unsaved ----- */
+  useEffect(() => {
+    if (!generating) return;
+    const onBefore = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("beforeunload", onBefore);
+    return () => window.removeEventListener("beforeunload", onBefore);
+  }, [generating]);
 
   /* ----- generation elapsed clock for the denoise placeholder caption ----- */
   useEffect(() => {
@@ -919,7 +1009,9 @@ export default function App() {
     // Merge once the staggered reveal (image -> prompt -> chips -> foot) finishes.
     window.setTimeout(() => {
       if (epochRef.current !== epoch) return; // library was cleared meanwhile
-      setGenerations((g) => [gen, ...g]);
+      // A focus/visibility reload may have already listed this record —
+      // merge by id so the card never duplicates.
+      setGenerations((g) => (g.some((x) => x.id === gen.id) ? g : [gen, ...g]));
       broadcastLibChanged();
       setSlots((prev) => prev.filter((x) => x.key !== key));
     }, 1100);
@@ -954,8 +1046,30 @@ export default function App() {
     setClearText("");
   };
 
+  /** Drop stored rows that no longer decrypt (key missing or corrupt). */
+  const deleteUnreadable = async () => {
+    const ids = unreadableIds;
+    if (ids.length === 0) return;
+    try {
+      for (const id of ids) {
+        try {
+          await deleteRecord(id);
+        } catch {
+          /* keep going; reload reconciles */
+        }
+      }
+      await reloadLibrary({ silent: true });
+      broadcastLibChanged();
+      pushToast("ok", `Removed ${ids.length} unreadable item(s).`);
+    } catch {
+      pushToast("err", "Could not remove unreadable items.");
+    }
+  };
+
   const clearAll = async () => {
-    if (generations.length === 0 || clearing) return;
+    // Unreadable-only libraries can still be wiped (clearRecords drops the
+    // whole store); generations.length alone would disable that.
+    if ((generations.length === 0 && unreadableIds.length === 0) || clearing) return;
     setClearing(true);
     setGenerations([]);
     setLightbox(null);
@@ -1001,20 +1115,38 @@ export default function App() {
     });
   };
 
-  const doExport = async () => {
+  const openBackupExport = () => {
+    setBackupPass("");
+    setBackupConfirm("");
+    setBackupErr("");
+    setBackupBusy(false);
+    setBackupDialog({ mode: "export" });
+  };
+
+  const downloadBackupFile = (json: string) => {
+    const blob = new Blob([json], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `imaginegenie-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  };
+
+  const confirmBackupExport = async () => {
+    if (backupBusy || backupPass.length < BACKUP_MIN_PASSPHRASE || backupPass !== backupConfirm) return;
+    setBackupBusy(true);
+    setBackupErr("");
     try {
-      const json = await exportBackup();
-      const blob = new Blob([json], { type: "application/json" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `imaginegenie-backup-${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-      pushToast("ok", "Encrypted backup downloaded.");
-    } catch {
-      pushToast("err", "Export failed.");
+      const json = await exportBackup(backupPass);
+      downloadBackupFile(json);
+      setBackupDialog(null);
+      pushToast("ok", "Passphrase-protected backup downloaded. Keep the passphrase — it can't be recovered.");
+    } catch (e) {
+      setBackupErr(e instanceof Error ? e.message : "Export failed.");
+    } finally {
+      setBackupBusy(false);
     }
   };
 
@@ -1022,22 +1154,54 @@ export default function App() {
     if (clearing) return;
     try {
       const text = await f.text();
-      let inFile: number;
+      let peek: { records: number; references: number; hasKeyWrap: boolean };
       try {
-        inFile = countBackupRecords(text);
+        peek = peekBackup(text);
       } catch {
         pushToast("err", "Import failed — not a valid backup.");
         return;
       }
-      pushToast("info", `${generations.length} in library, ${inFile} in file.`);
-      const n = await importBackup(text);
-      const extra = n.references > 0 ? ` (${n.references} reference(s))` : "";
-      pushToast("ok", `Imported ${n.records} generation(s)${extra}. Reloading…`);
-      await reloadLibrary({ silent: true });
-      broadcastLibChanged();
+      pushToast("info", `${generations.length} in library, ${peek.records + peek.references} in file.`);
+      setBackupPass("");
+      setBackupConfirm("");
+      setBackupErr("");
+      setBackupBusy(false);
+      setBackupDialog({
+        mode: "import",
+        text,
+        hasKeyWrap: peek.hasKeyWrap,
+        inFile: peek.records + peek.references,
+      });
     } catch {
       pushToast("err", "Import failed — not a valid backup.");
     }
+  };
+
+  const confirmBackupImport = async () => {
+    if (!backupDialog || backupDialog.mode !== "import" || backupBusy) return;
+    const { text, hasKeyWrap } = backupDialog;
+    if (hasKeyWrap && backupPass.length < BACKUP_MIN_PASSPHRASE) return;
+    setBackupBusy(true);
+    setBackupErr("");
+    try {
+      const n = await importBackup(text, backupPass);
+      setBackupDialog(null);
+      const extra = n.references > 0 ? ` (+${n.references} reference(s))` : "";
+      const skipped = n.unreadable > 0 ? ` ${n.unreadable} item(s) couldn't be decrypted and were skipped.` : "";
+      const legacy = n.legacy ? " Old backup: restores only where made." : "";
+      pushToast("ok", `Imported ${n.records} generation(s)${extra}.${skipped}${legacy} Reloading…`);
+      await reloadLibrary({ silent: true });
+      broadcastLibChanged();
+    } catch (e) {
+      setBackupErr(e instanceof Error ? e.message : "Import failed — not a valid backup.");
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const abortBackupDialog = () => {
+    if (backupBusy) return;
+    setBackupDialog(null);
   };
 
   function refsKb(urls: string[]): number {
@@ -1088,6 +1252,17 @@ export default function App() {
       return true;
     });
   }, [generations, search, aspectFilter]);
+
+  /** Slot results already visible in their own reveal card: a reload during
+   *  the reveal lists them too, so hide those ids here — never twice. */
+  const pendingGenIds = useMemo(
+    () => new Set(slots.map((s) => s.gen?.id).filter((id): id is string => !!id)),
+    [slots]
+  );
+  const visible = useMemo(
+    () => filtered.filter((g) => !pendingGenIds.has(g.id)),
+    [filtered, pendingGenIds]
+  );
 
   const estPrice = resolution === "2K" ? PRICE_2K : PRICE_1K;
   const countNum = clampCount(Number.parseInt(countStr, 10) || 1);
@@ -1196,6 +1371,15 @@ export default function App() {
           </div>
         </div>
       </header>
+      {degraded !== "" && (
+        <div className="degraded-banner" role="alert">
+          <AlertIcon size={15} />
+          <span>
+            Encryption unavailable: {degraded} — new images, backups and key storage are disabled
+            until crypto recovers (reload the page).
+          </span>
+        </div>
+      )}
 
       {/* side drawer: section switching */}
       <div
@@ -1317,12 +1501,6 @@ export default function App() {
                 value={prompt}
                 maxLength={MAX_PROMPT}
                 onChange={(e) => setPrompt(e.target.value)}
-                onKeyDown={(e) => {
-                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                    e.preventDefault();
-                    generateRef.current();
-                  }
-                }}
               />
             </div>
 
@@ -1582,7 +1760,8 @@ export default function App() {
             <button
               type="button"
               className="gen-btn"
-              disabled={generating || clearing}
+              disabled={generating || clearing || degraded !== ""}
+              title={degraded !== "" ? "Disabled: encryption unavailable" : undefined}
               onClick={() => void doGenerate()}
             >
               {generating ? (
@@ -1703,7 +1882,7 @@ export default function App() {
                       role="menuitem"
                       onClick={() => {
                         setLibMenuOpen(false);
-                        void doExport();
+                        openBackupExport();
                       }}
                     >
                       <DownloadIcon size={15} /> Back up library
@@ -1723,7 +1902,7 @@ export default function App() {
                       type="button"
                       role="menuitem"
                       className="danger"
-                      disabled={generations.length === 0 || clearing}
+                      disabled={(generations.length === 0 && unreadableIds.length === 0) || clearing}
                       onClick={() => {
                         setLibMenuOpen(false);
                         setClearText("");
@@ -1747,6 +1926,22 @@ export default function App() {
                 e.target.value = "";
               }}
             />
+
+            {!historyLoading && unreadableIds.length > 0 && (
+              <div className="unreadable-bar" role="alert">
+                <span>
+                  {unreadableIds.length} item{unreadableIds.length === 1 ? "" : "s"} can&apos;t be
+                  decrypted (key missing).
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-small btn-danger"
+                  onClick={() => void deleteUnreadable()}
+                >
+                  <DeleteIcon size={14} /> Delete them
+                </button>
+              </div>
+            )}
 
             {historyLoading ? (
               <div className="grid">
@@ -1811,7 +2006,7 @@ export default function App() {
             ) : (
               <div className="grid">
                 {slotCards}
-                {filtered.map((g) => (
+                {visible.map((g) => (
                   <GenCard
                     key={g.id}
                     g={g}
@@ -2138,9 +2333,9 @@ export default function App() {
             aria-labelledby={clearStep === 1 ? "clear-title-1" : "clear-title-2"}
             onClick={(e) => e.stopPropagation()}
           >
-            {clearStep === 1 ? (
+              {clearStep === 1 ? (
               <>
-                <h3 id="clear-title-1">Delete all {generations.length} images?</h3>
+                <h3 id="clear-title-1">Delete all {generations.length + unreadableIds.length} images?</h3>
                 <p>This removes everything from the encrypted library.</p>
                 <div className="confirm-actions">
                   <button
@@ -2167,7 +2362,7 @@ export default function App() {
               <>
                 <h3 id="clear-title-2">Are you absolutely sure?</h3>
                 <p>
-                  This cannot be undone. All {generations.length} images will be
+                  This cannot be undone. All {generations.length + unreadableIds.length} images will be
                   permanently deleted. Type <code>DELETE</code> to confirm.
                 </p>
                 <input
@@ -2287,6 +2482,171 @@ export default function App() {
                 {testing ? "Testing…" : "Test"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* passphrase backup / restore */}
+      {backupDialog && (
+        <div className="overlay overlay-top" onClick={abortBackupDialog}>
+          <div
+            className="confirm-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="backup-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {backupDialog.mode === "export" ? (
+              <>
+                <h3 id="backup-title">Protect backup</h3>
+                <p>
+                  The backup restores on any browser with this passphrase (min{" "}
+                  {BACKUP_MIN_PASSPHRASE} characters). It can&apos;t be recovered — keep it somewhere
+                  safe.
+                </p>
+                <div className="backup-field">
+                  <label htmlFor="backup-pass">Passphrase</label>
+                  <input
+                    ref={backupFirstInput}
+                    id="backup-pass"
+                    type="password"
+                    autoComplete="new-password"
+                    spellCheck={false}
+                    value={backupPass}
+                    onChange={(e) => setBackupPass(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void confirmBackupExport();
+                    }}
+                  />
+                </div>
+                <div className="backup-field">
+                  <label htmlFor="backup-confirm">Confirm passphrase</label>
+                  <input
+                    id="backup-confirm"
+                    type="password"
+                    autoComplete="new-password"
+                    spellCheck={false}
+                    value={backupConfirm}
+                    onChange={(e) => setBackupConfirm(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void confirmBackupExport();
+                    }}
+                  />
+                </div>
+                <div className="backup-status" aria-live="polite">
+                  {backupPass.length > 0 && backupPass.length < BACKUP_MIN_PASSPHRASE
+                    ? `At least ${BACKUP_MIN_PASSPHRASE} characters.`
+                    : backupConfirm.length > 0 && backupPass !== backupConfirm
+                      ? "Passphrases don't match."
+                      : ""}
+                </div>
+                {backupErr !== "" && (
+                  <div className="key-status err" role="alert">
+                    {backupErr}
+                  </div>
+                )}
+                <div className="confirm-actions">
+                  <button
+                    type="button"
+                    className="btn btn-small btn-ghost"
+                    disabled={backupBusy}
+                    onClick={abortBackupDialog}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-small"
+                    disabled={
+                      backupBusy ||
+                      backupPass.length < BACKUP_MIN_PASSPHRASE ||
+                      backupPass !== backupConfirm
+                    }
+                    onClick={() => void confirmBackupExport()}
+                  >
+                    {backupBusy ? "Encrypting…" : "Download backup"}
+                  </button>
+                </div>
+              </>
+            ) : backupDialog.hasKeyWrap ? (
+              <>
+                <h3 id="backup-title">Restore backup</h3>
+                <p>
+                  {backupDialog.inFile} item{backupDialog.inFile === 1 ? "" : "s"} in file. Enter the
+                  passphrase this backup was made with.
+                </p>
+                <div className="backup-field">
+                  <label htmlFor="backup-pass">Passphrase</label>
+                  <input
+                    ref={backupFirstInput}
+                    id="backup-pass"
+                    type="password"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={backupPass}
+                    onChange={(e) => setBackupPass(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void confirmBackupImport();
+                    }}
+                  />
+                </div>
+                {backupErr !== "" && (
+                  <div className="key-status err" role="alert">
+                    {backupErr}
+                  </div>
+                )}
+                <div className="confirm-actions">
+                  <button
+                    type="button"
+                    className="btn btn-small btn-ghost"
+                    disabled={backupBusy}
+                    onClick={abortBackupDialog}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-small"
+                    disabled={backupBusy || backupPass.length < BACKUP_MIN_PASSPHRASE}
+                    onClick={() => void confirmBackupImport()}
+                  >
+                    {backupBusy ? "Restoring…" : "Restore"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h3 id="backup-title">Restore old backup?</h3>
+                <p>
+                  This backup has no passphrase key — it restores only on the browser that created
+                  it. {backupDialog.inFile} item{backupDialog.inFile === 1 ? "" : "s"} in file;
+                  anything that doesn&apos;t decrypt here is skipped, never stored.
+                </p>
+                {backupErr !== "" && (
+                  <div className="key-status err" role="alert">
+                    {backupErr}
+                  </div>
+                )}
+                <div className="confirm-actions">
+                  <button
+                    type="button"
+                    className="btn btn-small btn-ghost"
+                    disabled={backupBusy}
+                    onClick={abortBackupDialog}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-small"
+                    disabled={backupBusy}
+                    onClick={() => void confirmBackupImport()}
+                  >
+                    {backupBusy ? "Restoring…" : "Import anyway"}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

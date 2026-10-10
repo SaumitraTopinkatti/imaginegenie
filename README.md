@@ -54,7 +54,7 @@ Headers + CSP ship via `public/_headers` (Netlify, copied to `dist/` on build):
   API calls to `https://openrouter.ai` only. If you set a custom
   `VITE_OPENROUTER_BASE`, add its origin to `connect-src` in `public/_headers`.
 
-Threat-model notes (honest limits, no passphrase changes planned):
+Threat-model notes (honest limits):
 
 - API key: held in tab memory (opt-in AES-GCM remembered copy in IndexedDB,
   decrypted only for viewing / Test / Generate). Any XSS that executes JS in
@@ -62,8 +62,15 @@ Threat-model notes (honest limits, no passphrase changes planned):
   holding the key is the only stronger isolation, deliberately not built.
 - Local library: AES-GCM with a device-held key stored alongside the data.
   Protection against casual inspection only (e.g. glancing at DevTools), not
-  against anyone with profile/filesystem access. Passphrase-derived encryption
-  would change that at the cost of an unlock step on every visit.
+  against anyone with profile/filesystem access. If encryption can't start,
+  the app shows a banner and refuses to save or generate — new data is never
+  silently downgraded.
+- Backups ("Back up library") are passphrase-protected: the device key is
+  wrapped with a key derived from your passphrase (PBKDF2-SHA256, 600k
+  iterations, random salt) and embedded in the file, so the backup restores on
+  any browser with the passphrase. Keep the passphrase — it can't be
+  recovered. Backups made before this change have no wrapped key and restore
+  only on the browser that created them (the restore dialog says so).
 
 ## Scripts
 - `npm run dev` — start Vite dev server

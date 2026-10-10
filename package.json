@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "a11y": "node scripts/a11y-check.mjs",
-    "a11y:scan": "node scripts/a11y-scan.mjs"
+    "a11y:scan": "node scripts/a11y-scan.mjs",
+    "csp:serve": "node scripts/csp-serve.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

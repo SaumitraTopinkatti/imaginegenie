@@ -90,10 +90,20 @@ export function downloadDataUrl(dataUrl: string, filename: string) {
   a.remove();
 }
 
+/** data URL -> Blob without fetch(): fetch(data:) is blocked by connect-src CSP. */
+export function dataUrlToBlob(u: string): Blob {
+  const comma = u.indexOf(",");
+  if (comma < 0) throw new Error("Copy failed.");
+  const mime = /^data:([^;,]+)/.exec(u.slice(0, comma))?.[1] ?? "image/png";
+  const bin = atob(u.slice(comma + 1));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
 /** Copy an image data URL to the clipboard as a PNG blob. */
 export async function copyImageDataUrl(dataUrl: string): Promise<void> {
-  const res = await fetch(dataUrl);
-  const blob = await res.blob();
+  const blob = dataUrlToBlob(dataUrl);
   const png = blob.type === "image/png" ? blob : await toPng(blob);
   await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
 }
