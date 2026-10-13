@@ -74,6 +74,7 @@ import {
   type TabId,
 } from "./lib/route";
 import { listReferenceThumbs, loadReferenceImage } from "./lib/library";
+import { useBottomSheet } from "./lib/useBottomSheet";
 import DenoiseFrame from "./components/DenoiseFrame";
 import Dialog, { hasOpenDialog } from "./components/Dialog";
 import logoUrl from "./assets/logo.png";
@@ -357,7 +358,17 @@ export default function App() {
   const clearInputRef = useRef<HTMLInputElement>(null);
   const asideRef = useRef<HTMLElement>(null);
   const peekRef = useRef<HTMLButtonElement>(null);
-  const touchY = useRef<number | null>(null);
+  // Studio's sheet runs on the shared hook (same behaviour as the inline
+  // effects it replaces): desktop auto-close, scroll lock, focus trap, Esc,
+  // grab swipe, guarded focus return. The global Esc handler below also
+  // closes the drawer (it owns the lightbox too) — harmless duplication.
+  const { grabProps: composerGrabProps } = useBottomSheet({
+    open: drawerOpen,
+    setOpen: setDrawerOpen,
+    sheetRef: asideRef,
+    peekRef,
+    initialFocusSelector: "textarea",
+  });
   const [toasts, setToasts] = useState<Toast[]>([]);
   const importInput = useRef<HTMLInputElement>(null);
 
@@ -1003,50 +1014,7 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  /* ----- mobile drawer: auto-close on desktop, scroll lock, light focus trap ----- */
-  useEffect(() => {
-    const mq = window.matchMedia("(min-width: 901px)");
-    const onChange = (e: MediaQueryListEvent) => {
-      if (e.matches) setDrawerOpen(false);
-    };
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, []);
-
-  useEffect(() => {
-    if (!drawerOpen) return;
-    if (!window.matchMedia("(max-width: 900px)").matches) {
-      setDrawerOpen(false);
-      return;
-    }
-    document.body.style.overflow = "hidden";
-    const aside = asideRef.current;
-    aside?.querySelector("textarea")?.focus({ preventScroll: true });
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Tab" || !aside) return;
-      const items = Array.from(
-        aside.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]), [contenteditable="true"]'
-        )
-      );
-      if (items.length === 0) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    aside?.addEventListener("keydown", onKey);
-    return () => {
-      document.body.style.overflow = "";
-      aside?.removeEventListener("keydown", onKey);
-      peekRef.current?.focus({ preventScroll: true });
-    };
-  }, [drawerOpen]);
+  /* ----- mobile drawer behaviour lives in useBottomSheet (see above) ----- */
 
   /* ----- delete confirmation: Dialog handles focus, trap, layered Esc ----- */
 
@@ -1622,18 +1590,7 @@ export default function App() {
                 : {})}
             >
             {/* mobile sheet grab handle */}
-            <div
-              className="sheet-grab"
-              onTouchStart={(e) => {
-                touchY.current = e.touches[0].clientY;
-              }}
-              onTouchEnd={(e) => {
-                if (touchY.current == null) return;
-                const dy = e.changedTouches[0].clientY - touchY.current;
-                touchY.current = null;
-                if (dy > 70) setDrawerOpen(false);
-              }}
-            >
+            <div className="sheet-grab" {...composerGrabProps}>
               <span className="grab-handle" aria-hidden="true" />
               <span className="grab-row">
                 <span className="grab-label">

@@ -32,6 +32,7 @@ Single-user AI image studio (Vite + React 18 + TS). Prompt → Seedream 5.0 Pro 
 - Mask geometry always derives from the overlay canvas rect (paint mapping + brush ring share one frame). `containerRef` is keyboard-shortcut scope only.
 - `e2e` alias note: vite `mode=e2e` aliases every `secureStore` specifier to the mock — new specifier spellings (`./secureStore` from `lib/`) need their own alias entry.
 - `src/components/DenoiseFrame.tsx` — canvas pixel-drift loader; loops until `done`, then finishes to clear and calls `onClean`.
+- `src/lib/useBottomSheet.ts` — shared mobile-sheet behaviour (`SHEET_MQ`, scroll lock, focus trap, Esc, grab swipe, guarded peek focus-return). Studio's drawer and Inpaint's controls both run on it; sheet CSS is shared via `.composer, .inpaint-sheet` selector lists (never put `.composer` on Inpaint).
 - `src/components/icons.tsx` — all icons.
 - `src/lib/openrouter.ts` — `MODEL` / `MODEL_ENDPOINT_SLUG` constants + API calls. `src/lib/images.ts` — image helpers. `src/lib/secureStore.ts` — AES-GCM IndexedDB store (generations + references); key held in memory only.
 - Generation reveal rule: a pending slot reuses the **same card node** (`Slot {key, gen, revealing, epoch}`, merge after 1100ms, epoch-guarded). Never unmount/remount the card between loader and image or the reveal sequence breaks.
@@ -52,7 +53,7 @@ Single-user AI image studio (Vite + React 18 + TS). Prompt → Seedream 5.0 Pro 
 - Every control needs **hover AND `:active` feedback** (touch has no hover — `:active` is required, not optional). Focus-visible ring is global.
 - `body { user-select: none }` with an opt-in allowlist for dynamic values (costs, prompts, times, key status, errors). Keep the allowlist updated when adding dynamic text.
 - Native `<select>`s use `appearance: none` + drawn SVG chevron (`padding-right: 34px`); the open dropdown list itself stays OS-native. Seed input is `type=text inputMode=numeric`. No `<datalist>` — group suggestions are a custom `combobox` + `listbox` popover (`mousedown` beats blur).
-- Desktop (≥901px): composer is sticky fixed-height with scrollable body + pinned footer; Studio tab locks the viewport (`body[data-tab="studio"]`, gallery scrolls internally). Mobile: composer is a bottom sheet + peek-bar; drawer goes full-height with its own close row.
+- Desktop (≥901px): composer is sticky fixed-height with scrollable body + pinned footer; Studio tab locks the viewport (`body[data-tab="studio"]`, gallery scrolls internally). Mobile: composer is a bottom sheet + peek-bar; drawer goes full-height with its own close row. Inpaint controls use the same sheet (`useBottomSheet` + `.inpaint-sheet`, peek "Describe the edit · tap to expand") — canvas/result stay in the main view. The panel must still never take `.composer` (that triggers Studio's paid Ctrl+Enter).
 - New UI must follow the existing design (tokens, components, patterns above). No visual drift without explicit user confirmation.
 
 ## Workflow

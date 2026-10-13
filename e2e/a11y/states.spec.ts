@@ -3,7 +3,7 @@
 // Emulation projects (reduced-motion, forced-colors) run a subset; ARIA
 // snapshots assert on desktop only. Roles/names only — no test ids.
 import type { Page } from "@playwright/test";
-import { test, expect, scanState, seedLibrary, gotoTab, fillKey, openKeyModal, ensureComposerOpen, awaitRevealSettled, paintStroke, marker } from "../fixtures";
+import { test, expect, scanState, seedLibrary, gotoTab, fillKey, openKeyModal, ensureComposerOpen, awaitRevealSettled, paintStroke, marker, openSourcePicker, pickFirstGeneration, ensureInpaintControlsOpen } from "../fixtures";
 import { pngDataUrl } from "../mock-api/png.mjs";
 
 const EMU_SUBSET = new Set([
@@ -356,6 +356,7 @@ test("drawer-open", async ({ app }) => {
 
 test("inpaint-empty", async ({ app }) => {
   skipUnlessEmu("inpaint-empty");
+  test.skip(test.info().project.name === "mobile", "mobile inpaint controls are a closed sheet; see inpaint-sheet-open");
   await gotoTab(app, "inpaint");
   await expect(app.getByRole("heading", { name: /Inpaint/ })).toBeVisible();
   await scanState(app, "inpaint-empty");
@@ -369,8 +370,7 @@ test("inpaint-picker-open", async ({ app }) => {
   await seedLibrary(app, { records: [{ prompt: "Picker subject" }] });
   await app.reload();
   await gotoTab(app, "inpaint");
-  await app.getByRole("button", { name: /Choose image|Change image/ }).first().click();
-  await expect(app.getByRole("dialog", { name: "Choose image" })).toBeVisible();
+  await openSourcePicker(app);
   await scanState(app, "inpaint-picker-open");
 });
 
@@ -379,9 +379,7 @@ test("inpaint-editing", async ({ app }) => {
   await seedLibrary(app, { records: [{ prompt: "Editing subject" }] });
   await app.reload();
   await gotoTab(app, "inpaint");
-  await app.getByRole("button", { name: /Choose image|Change image/ }).first().click();
-  await app.getByRole("button", { name: /^Use image:/ }).first().click();
-  await expect(app.locator(".mask-overlay")).toBeVisible({ timeout: 8000 });
+  await pickFirstGeneration(app);
   await paintStroke(app, { x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 });
   await scanState(app, "inpaint-editing");
 });
@@ -392,10 +390,9 @@ test("inpaint-result", async ({ app }) => {
   await app.reload();
   await fillKey(app, "sk-or-test-ok");
   await gotoTab(app, "inpaint");
-  await app.getByRole("button", { name: /Choose image|Change image/ }).first().click();
-  await app.getByRole("button", { name: /^Use image:/ }).first().click();
-  await expect(app.locator(".mask-overlay")).toBeVisible({ timeout: 8000 });
+  await pickFirstGeneration(app);
   await paintStroke(app, { x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 });
+  await ensureInpaintControlsOpen(app);
   await app.getByRole("textbox", { name: "Inpaint instruction" }).fill("state result check");
   await app.getByRole("button", { name: /Generate ·/ }).click();
   await expect(app.locator(".inpaint-result-img")).toBeVisible({ timeout: 20000 });
@@ -407,6 +404,17 @@ test("mobile-sheet-open", async ({ app }) => {
   await app.getByRole("button", { name: /tap to expand/i }).click();
   await expect(app.getByRole("dialog", { name: "Image composer" })).toBeVisible();
   await scanState(app, "mobile-sheet-open");
+});
+
+test("inpaint-sheet-open", async ({ app }) => {
+  skipUnlessEmu("inpaint-sheet-open");
+  test.skip(test.info().project.name !== "mobile", "mobile sheet only");
+  await seedLibrary(app, { records: [{ prompt: "Sheet state scene" }] });
+  await app.reload();
+  await gotoTab(app, "inpaint");
+  await pickFirstGeneration(app);
+  await ensureInpaintControlsOpen(app);
+  await scanState(app, "inpaint-sheet-open");
 });
 
 test("degraded-banner", async ({ app }) => {

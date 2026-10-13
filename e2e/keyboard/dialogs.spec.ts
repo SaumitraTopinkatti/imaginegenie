@@ -1,6 +1,6 @@
 // Keyboard/focus contract: all 10 Dialogs + app-specific key behavior.
 import type { Page } from "@playwright/test";
-import { test, expect, assertDialogContract, assertLayeredEsc, seedLibrary, gotoTab, fillKey, ensureComposerOpen, loggedWithPrompt, paintStroke, marker } from "../fixtures";
+import { test, expect, assertDialogContract, assertLayeredEsc, seedLibrary, gotoTab, fillKey, ensureComposerOpen, loggedWithPrompt, paintStroke, marker, openSourcePicker, pickFirstGeneration, ensureInpaintControlsOpen } from "../fixtures";
 import { pngDataUrl } from "../mock-api/png.mjs";
 
 async function openMenu(app: Page) {
@@ -146,7 +146,7 @@ test("contract: inpaint source picker", async ({ app }) => {
   await gotoTab(app, "inpaint");
   await assertDialogContract(app, {
     open: async () => {
-      await app.getByRole("button", { name: /Choose image|Change image/ }).first().click();
+      await openSourcePicker(app);
     },
     dialogName: "Choose image",
     returnTo: /Choose image|Change image/,
@@ -162,13 +162,11 @@ test("contract: discard-mask alertdialog", async ({ app }) => {
   });
   await app.reload();
   await gotoTab(app, "inpaint");
-  await app.getByRole("button", { name: /Choose image|Change image/ }).first().click();
-  await app.getByRole("button", { name: /^Use image:/ }).first().click();
-  await expect(app.locator(".mask-overlay")).toBeVisible({ timeout: 8000 });
+  await pickFirstGeneration(app);
   await paintStroke(app, { x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 });
   await assertDialogContract(app, {
     open: async () => {
-      await app.getByRole("button", { name: /Choose image|Change image/ }).first().click();
+      await openSourcePicker(app);
       await app.getByRole("button", { name: /^Use image:/ }).nth(1).click();
     },
     dialogName: "Discard mask?",
@@ -186,10 +184,9 @@ test("editor shortcuts stay out of the instruction field", async ({ app }) => {
   await seedLibrary(app, { records: [{ prompt: "Shortcut source" }] });
   await app.reload();
   await gotoTab(app, "inpaint");
-  await app.getByRole("button", { name: /Choose image|Change image/ }).first().click();
-  await app.getByRole("button", { name: /^Use image:/ }).first().click();
-  await expect(app.locator(".mask-overlay")).toBeVisible({ timeout: 8000 });
+  await pickFirstGeneration(app);
   // Typing [ ] in the instruction must not touch the brush or undo stack.
+  await ensureInpaintControlsOpen(app);
   await app.getByRole("textbox", { name: "Inpaint instruction" }).click();
   await app.keyboard.type("a [b]");
   await expect(app.getByRole("textbox", { name: "Inpaint instruction" })).toHaveValue("a [b]");

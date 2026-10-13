@@ -1,7 +1,7 @@
 // API-key flows: normalisation, truthful Test (/key), auth gate, remember.
 // Roles/names only — never the key value, length or prefix in assertions.
 import type { Page } from "@playwright/test";
-import { test, expect, seedLibrary, gotoTab, fillKey, openKeyModal, mockApi, paintStroke, loggedWithPrompt, marker, ensureComposerOpen } from "../fixtures";
+import { test, expect, seedLibrary, gotoTab, fillKey, openKeyModal, mockApi, paintStroke, loggedWithPrompt, marker, ensureComposerOpen, pickFirstGeneration, ensureInpaintControlsOpen } from "../fixtures";
 import { pngDataUrl } from "../mock-api/png.mjs";
 
 /** As pasted from a doc: padding, quotes, Bearer prefix, trailing newline. */
@@ -66,10 +66,9 @@ test("mangled pasted key generates in Inpaint with a clean header", async ({ app
   await app.reload();
   await fillKey(app, MANGLED);
   await gotoTab(app, "inpaint");
-  await app.getByRole("button", { name: /Choose image|Change image/ }).first().click();
-  await app.getByRole("button", { name: /^Use image:/ }).first().click();
-  await expect(app.locator(".mask-overlay")).toBeVisible({ timeout: 8000 });
+  await pickFirstGeneration(app);
   await paintStroke(app, { x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 });
+  await ensureInpaintControlsOpen(app);
   await app.getByRole("textbox", { name: "Inpaint instruction" }).fill(`mangled key inpaint ${m}`);
   await app.getByRole("button", { name: /Generate ·/ }).click();
   await expect(app.locator(".inpaint-result-img")).toBeVisible({ timeout: 20000 });

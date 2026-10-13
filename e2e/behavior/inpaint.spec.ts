@@ -1,19 +1,8 @@
 // Inpaint flows: prompt wrap + ref order, knob, guards, cancel, tag,
 // mid-flight tab switch, composite pixels, backup survival. Roles/names only.
 import type { Page } from "@playwright/test";
-import { test, expect, seedLibrary, gotoTab, fillKey, loggedWithPrompt, paintStroke, marker, type MockRequest } from "../fixtures";
+import { test, expect, seedLibrary, gotoTab, fillKey, loggedWithPrompt, paintStroke, marker, openSourcePicker, pickFirstGeneration, ensureInpaintControlsOpen, closeInpaintControls, type MockRequest } from "../fixtures";
 import { pngDataUrl } from "../mock-api/png.mjs";
-
-async function openPicker(app: Page) {
-  await app.getByRole("button", { name: /Choose image|Change image/ }).first().click();
-  await expect(app.getByRole("dialog", { name: "Choose image" })).toBeVisible();
-}
-
-async function pickFirstGeneration(app: Page) {
-  await openPicker(app);
-  await app.getByRole("button", { name: /^Use image:/ }).first().click();
-  await expect(app.locator(".mask-overlay")).toBeVisible({ timeout: 8000 });
-}
 
 async function fullFlow(app: Page, instruction: string) {
   await app.reload();
@@ -21,6 +10,7 @@ async function fullFlow(app: Page, instruction: string) {
   await gotoTab(app, "inpaint");
   await pickFirstGeneration(app);
   await paintStroke(app, { x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 });
+  await ensureInpaintControlsOpen(app);
   await app.getByRole("textbox", { name: "Inpaint instruction" }).fill(instruction);
   await app.getByRole("button", { name: /Generate ·/ }).click();
   await expect(app.locator(".inpaint-result-img")).toBeVisible({ timeout: 20000 });
@@ -71,6 +61,7 @@ test("knob off sends only the marked copy", async ({ app }) => {
   await gotoTab(app, "inpaint");
   await pickFirstGeneration(app);
   await paintStroke(app, { x: 0.3, y: 0.5 }, { x: 0.7, y: 0.5 });
+  await ensureInpaintControlsOpen(app);
   await app.getByRole("textbox", { name: "Inpaint instruction" }).fill(`remove it ${m}`);
   await app.getByText("Advanced").click();
   await app.getByText("Send original as reference").click();
@@ -89,15 +80,18 @@ test("guards send zero requests", async ({ app }) => {
   await fillKey(app, "sk-or-test-ok");
   await gotoTab(app, "inpaint");
   // No source.
+  await ensureInpaintControlsOpen(app);
   await app.getByRole("textbox", { name: "Inpaint instruction" }).fill(`guarded ${m}`);
   await app.getByRole("button", { name: /Generate ·/ }).click();
   await expect(app.locator("#inpaint-error")).toContainText("Choose an image");
   // No mask.
   await pickFirstGeneration(app);
+  await ensureInpaintControlsOpen(app);
   await app.getByRole("button", { name: /Generate ·/ }).click();
   await expect(app.locator("#inpaint-error")).toContainText("Paint the area");
   // Empty instruction.
   await paintStroke(app, { x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 });
+  await ensureInpaintControlsOpen(app);
   await app.getByRole("textbox", { name: "Inpaint instruction" }).fill("");
   await app.getByRole("button", { name: /Generate ·/ }).click();
   await expect(app.locator("#inpaint-error")).toContainText("Describe the change");
@@ -111,6 +105,7 @@ test("no key and degraded crypto send zero requests", async ({ app }) => {
   await gotoTab(app, "inpaint");
   await pickFirstGeneration(app);
   await paintStroke(app, { x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 });
+  await ensureInpaintControlsOpen(app);
   await app.getByRole("textbox", { name: "Inpaint instruction" }).fill(`keyless ${m}`);
   await app.getByRole("button", { name: /Generate ·/ }).click();
   await expect(app.locator("#inpaint-error")).toContainText("API key");
@@ -121,6 +116,7 @@ test("no key and degraded crypto send zero requests", async ({ app }) => {
   // Strokes don't survive reload (memory-only): repaint.
   await pickFirstGeneration(app);
   await paintStroke(app, { x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 });
+  await ensureInpaintControlsOpen(app);
   await app.getByRole("textbox", { name: "Inpaint instruction" }).fill(`keyless ${m}`);
   // Degraded disables the button outright (mirrors Studio): nothing to click.
   await expect(app.getByRole("button", { name: /Generate ·/ })).toBeDisabled();
@@ -135,6 +131,7 @@ test("cancel aborts the run", async ({ app }) => {
   await gotoTab(app, "inpaint");
   await pickFirstGeneration(app);
   await paintStroke(app, { x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 });
+  await ensureInpaintControlsOpen(app);
   await app.getByRole("textbox", { name: "Inpaint instruction" }).fill(`slow one ${m} [[mock:delay,ms=8000]]`);
   await app.getByRole("button", { name: /Generate ·/ }).click();
   await expect(app.getByRole("button", { name: /^Cancel ·/ })).toBeVisible();
@@ -151,6 +148,7 @@ test("tab switch mid-flight still lands the result", async ({ app }) => {
   await gotoTab(app, "inpaint");
   await pickFirstGeneration(app);
   await paintStroke(app, { x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 });
+  await ensureInpaintControlsOpen(app);
   await app.getByRole("textbox", { name: "Inpaint instruction" }).fill(`patient ${m} [[mock:delay,ms=4000]]`);
   await app.getByRole("button", { name: /Generate ·/ }).click();
   await gotoTab(app, "studio");
@@ -171,6 +169,7 @@ test("marked overlay is translucent and uniform; refs share dimensions", async (
   // Crossing strokes: overlap must not stack darker (D2 vector replay).
   await paintStroke(app, { x: 0.2, y: 0.4 }, { x: 0.8, y: 0.4 });
   await paintStroke(app, { x: 0.5, y: 0.2 }, { x: 0.5, y: 0.6 });
+  await ensureInpaintControlsOpen(app);
   await app.getByRole("textbox", { name: "Inpaint instruction" }).fill(`tint check ${m}`);
   await app.getByRole("button", { name: /Generate ·/ }).click();
   await expect(app.locator(".inpaint-result-img")).toBeVisible({ timeout: 20000 });
@@ -227,6 +226,7 @@ test("pixel-exact composite: outside equals source, centre equals output", async
   await gotoTab(app, "inpaint");
   await pickFirstGeneration(app);
   await paintStroke(app, { x: 0.4, y: 0.4 }, { x: 0.6, y: 0.6 });
+  await ensureInpaintControlsOpen(app);
   await app.getByRole("textbox", { name: "Inpaint instruction" }).fill(`pixel check ${m}`);
   await app.getByRole("button", { name: /Generate ·/ }).click();
   await expect(app.locator(".inpaint-result-img")).toBeVisible({ timeout: 20000 });
@@ -284,7 +284,7 @@ test("entry points: lightbox, viewer and references segment", async ({ app }) =>
   await app.getByRole("dialog", { name: "Reference image" }).getByRole("button", { name: "Inpaint", exact: true }).click();
   await expect(app.locator(".mask-overlay")).toBeVisible({ timeout: 8000 });
   // Picker references segment.
-  await openPicker(app);
+  await openSourcePicker(app);
   await app.getByRole("button", { name: "References", exact: true }).click();
   await app.getByRole("button", { name: "Use reference Entry ref" }).click();
   await expect(app.locator(".mask-overlay")).toBeVisible({ timeout: 8000 });
@@ -297,13 +297,19 @@ test("undo/redo/clear gate the mask", async ({ app }) => {
   await gotoTab(app, "inpaint");
   await pickFirstGeneration(app);
   await paintStroke(app, { x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 });
+  await ensureInpaintControlsOpen(app);
   await app.getByRole("textbox", { name: "Inpaint instruction" }).fill("history check");
+  // Undo/Redo live in the mask toolbar behind the sheet's backdrop.
+  await closeInpaintControls(app);
   // Undo until the mask is empty (tap path paints several dab strokes).
   const undoBtn = app.getByRole("button", { name: "Undo" });
   for (let i = 0; i < 5 && await undoBtn.isEnabled(); i++) await undoBtn.click();
+  await ensureInpaintControlsOpen(app);
   await app.getByRole("button", { name: /Generate ·/ }).click();
   await expect(app.locator("#inpaint-error")).toContainText("Paint the area");
+  await closeInpaintControls(app);
   await app.getByRole("button", { name: "Redo" }).click();
+  await ensureInpaintControlsOpen(app);
   await app.getByRole("button", { name: /Generate ·/ }).click();
   await expect(app.locator(".inpaint-result-img")).toBeVisible({ timeout: 20000 });
 });

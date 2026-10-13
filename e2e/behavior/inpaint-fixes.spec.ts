@@ -1,15 +1,8 @@
 // N11–N14 visual regressions: picker surface, label overflow, cursor
 // alignment, size preview + wheel. Roles/names + geometry only.
 import type { Page } from "@playwright/test";
-import { test, expect, seedLibrary, gotoTab } from "../fixtures";
+import { test, expect, seedLibrary, gotoTab, pickFirstGeneration, openSourcePicker, ensureInpaintControlsOpen } from "../fixtures";
 import { pngDataUrl } from "../mock-api/png.mjs";
-
-async function pickFirstGeneration(app: Page) {
-  await app.getByRole("button", { name: /Choose image|Change image/ }).first().click();
-  await expect(app.getByRole("dialog", { name: "Choose image" })).toBeVisible();
-  await app.getByRole("button", { name: /^Use image:/ }).first().click();
-  await expect(app.locator(".mask-overlay")).toBeVisible({ timeout: 8000 });
-}
 
 async function coarse(app: Page) {
   return app.evaluate(() => window.matchMedia("(pointer: coarse)").matches);
@@ -24,7 +17,7 @@ test("picker is a surfaced modal with an internal scroll grid", async ({ app }) 
   });
   await app.reload();
   await gotoTab(app, "inpaint");
-  await app.getByRole("button", { name: /Choose image|Change image/ }).first().click();
+  await openSourcePicker(app);
   const panel = app.getByRole("dialog", { name: "Choose image" });
   await expect(panel).toBeVisible();
   // Surfaced: opaque background, desktop width >= 600px.
@@ -60,11 +53,12 @@ test("200-char source label stays inside the controls panel", async ({ app }) =>
   await seedLibrary(app, { references: [{ name: longName }] });
   await app.reload();
   await gotoTab(app, "inpaint");
-  await app.getByRole("button", { name: /Choose image|Change image/ }).first().click();
+  await openSourcePicker(app);
   await app.getByRole("button", { name: /^References/ }).click();
   await app.getByRole("button", { name: `Use reference ${longName}` }).click();
   await expect(app.locator(".mask-overlay")).toBeVisible({ timeout: 8000 });
-  // Accessible name still carries the full label.
+  // Accessible name still carries the full label (sheet holds it on mobile).
+  await ensureInpaintControlsOpen(app);
   await expect(app.getByRole("button", { name: `Change image, currently: ${longName}` })).toBeVisible();
   const row = await app.locator(".inpaint-source-row").boundingBox();
   const controls = await app.locator(".inpaint-controls").boundingBox();

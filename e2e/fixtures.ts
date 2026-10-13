@@ -116,11 +116,53 @@ export async function seedLibrary(page: Page, opts: SeedOpts) {
   return ids as { recordIds: string[]; referenceIds: string[] };
 }
 
+/** Close the mobile Inpaint sheet if open (backdrop would cover the menu). */
+export async function closeInpaintControls(page: Page) {
+  const dlg = page.getByRole("dialog", { name: "Inpaint controls" });
+  if (await dlg.isVisible()) {
+    await page.keyboard.press("Escape");
+    // Closing slides down over ~0.36s: still "visible" right after Esc.
+    await expect(dlg).toBeHidden();
+  }
+}
+
+/**
+ * Open the mobile Inpaint sheet via its peek bar. No-op on desktop (the
+ * peek bar is display:none there) and when already open.
+ */
+export async function ensureInpaintControlsOpen(page: Page) {
+  const dlg = page.getByRole("dialog", { name: "Inpaint controls" });
+  if (await dlg.isVisible()) return;
+  const peek = page.locator("#inpaint-main").getByRole("button", { name: /tap to expand/i });
+  if (await peek.isVisible()) {
+    await peek.click();
+    await expect(dlg).toBeVisible();
+  }
+}
+
+/**
+ * Open the Inpaint source picker through the sheet's Choose/Change button
+ * (DOM-first, so the hidden in-sheet copy never wins on mobile).
+ */
+export async function openSourcePicker(page: Page) {
+  await ensureInpaintControlsOpen(page);
+  await page.getByRole("button", { name: /Choose image|Change image/ }).first().click();
+  await expect(page.getByRole("dialog", { name: "Choose image" })).toBeVisible();
+}
+
+/** openSourcePicker + take the first generation, waiting for the editor. */
+export async function pickFirstGeneration(page: Page) {
+  await openSourcePicker(page);
+  await page.getByRole("button", { name: /^Use image:/ }).first().click();
+  await expect(page.locator(".mask-overlay")).toBeVisible({ timeout: 8000 });
+}
+
 export async function gotoTab(page: Page, tab: "studio" | "refs" | "inpaint") {
   // A open mobile sheet + backdrop would intercept the menu: close it first.
   if (await page.getByRole("dialog", { name: "Image composer" }).isVisible()) {
     await page.keyboard.press("Escape");
   }
+  await closeInpaintControls(page);
   if (tab === "refs") {
     await page.getByRole("button", { name: /sections menu/i }).click();
     await page.getByRole("link", { name: /^References/ }).click();
@@ -140,6 +182,9 @@ export async function gotoTab(page: Page, tab: "studio" | "refs" | "inpaint") {
 }
 
 export async function fillKey(page: Page, key: string) {
+  // The open sheet's backdrop covers the header: close it first (no-op
+  // anywhere the Inpaint sheet doesn't exist).
+  await closeInpaintControls(page);
   await page.getByRole("button", { name: /OpenRouter API key/ }).click();
   await page.getByRole("textbox", { name: "OpenRouter API key" }).fill(key);
   // Remember + close: the working copy is dropped on modal close unless
@@ -182,14 +227,33 @@ export async function paintStroke(
   to: { x: number; y: number },
   steps = 8
 ) {
+  // Paints land on raw coordinates: close the sheet first (open, its
+  // backdrop swallows taps; closed, its peek bar can catch low ones).
+  await closeInpaintControls(page);
   // The sticky header can cover a scrolled-under canvas top: centre it first,
   // then measure fresh (boundingBox is viewport-relative).
   await page.locator(".mask-overlay").evaluate((el) => el.scrollIntoView({ block: "center" }));
-  const box = await page.locator(".mask-overlay").boundingBox();
+  let box = await page.locator(".mask-overlay").boundingBox();
   if (!box) throw new Error("mask canvas not visible");
+  const coarse = await page.evaluate(() => window.matchMedia("(pointer: coarse)").matches);
+  if (coarse) {
+    // A tap low on the canvas can land on the fixed peek bar and open the
+    // sheet instead of painting: lift the canvas clear, then re-measure.
+    const peekBox = await page.locator("#inpaint-main .peek-bar").boundingBox();
+    const pts: Array<[number, number]> = [
+      [from.x, from.y],
+      [(from.x + to.x) / 2, (from.y + to.y) / 2],
+      [to.x, to.y],
+    ];
+    if (peekBox && pts.some(([fx, fy]) => box!.x + box!.width * fx >= peekBox.x - 4 && box!.y + box!.height * fy >= peekBox.y - 4)) {
+      await page.locator(".mask-overlay").evaluate((el) => el.scrollIntoView({ block: "start" }));
+      await page.evaluate(() => window.scrollBy(0, -70));
+      box = await page.locator(".mask-overlay").boundingBox();
+      if (!box) throw new Error("mask canvas not visible");
+    }
+  }
   const px = (fx: number) => box.x + box.width * fx;
   const py = (fy: number) => box.y + box.height * fy;
-  const coarse = await page.evaluate(() => window.matchMedia("(pointer: coarse)").matches);
   if (coarse) {
     // Touch taps stamp dabs (single-pointer path): endpoints + midpoint.
     await page.touchscreen.tap(px(from.x), py(from.y));

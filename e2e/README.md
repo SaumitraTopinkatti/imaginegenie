@@ -23,8 +23,12 @@ Ports (env-overridable): app 4190 (`E2E_APP_PORT`), mock API 4191
 ## Layout
 
 - `fixtures.ts` — `app` page (fresh context, guard, store reset), `mockApi`
-  client, `seedLibrary`, `gotoTab` (studio/refs/inpaint), `fillKey`,
-  `paintStroke` (mouse drag; touch taps on coarse pointers),
+  client, `seedLibrary`, `gotoTab` (studio/refs/inpaint; closes an open
+  Inpaint sheet first), `fillKey` (same), `paintStroke` (mouse drag; touch
+  taps on coarse pointers, sheet closed + taps kept clear of the peek bar),
+  `ensureInpaintControlsOpen` / `closeInpaintControls` (mobile peek-bar
+  open / Esc close; no-ops on desktop), `openSourcePicker` /
+  `pickFirstGeneration` (always through the sheet's Choose/Change button),
   `assertDialogContract`, `assertLayeredEsc`, `scanState` (axe tags +
   allowlist + per-test JSON).
 - `mocks/secureStore.mock.ts` — every real export, in-memory + localStorage
@@ -41,8 +45,10 @@ Ports (env-overridable): app 4190 (`E2E_APP_PORT`), mock API 4191
   the server is shared across parallel workers. Per-prompt counters keep
   `fail-nth` parallel-safe.
 - `mock-api/png.mjs` — deterministic PNG fixtures (zlib encoder, no binaries).
-- `a11y/states.spec.ts` — 34 states × projects; emulation runs a subset;
-  ARIA snapshots (`__aria__/`) assert on desktop only.
+- `a11y/states.spec.ts` — 35 states × projects; emulation runs a subset;
+  ARIA snapshots (`__aria__/`) assert on desktop only (`inpaint-empty` skips
+  mobile — its heading lives in the closed sheet; `inpaint-sheet-open` covers
+  the mobile sheet instead).
 - `a11y/allowlist.json` — known incompletes with justification (`color-contrast`
   + one scoped `aria-valid-attr-value` on `lib-menu-open`: `true` is spec-valid,
   popup is `role=group`, axe cannot verify popup type).
@@ -120,6 +126,9 @@ Ports (env-overridable): app 4190 (`E2E_APP_PORT`), mock API 4191
 - Mobile sheet dialog semantics live on a `display:contents` wrapper div
   inside the composer `aside` (desktop stays a plain complementary region);
   role/name verified via `getByRole("dialog", { name: "Image composer" })`.
+  The Inpaint sheet works the same way (`dialog "Inpaint controls"`, closed
+  by X / backdrop / Esc / grab swipe; closes on success, on tab switch, and
+  above 900px; errors while closed also toast).
 - `aria-valid-attr-value` incomplete on `button[aria-haspopup="true"]`
   (lib-menu-open): reviewed, kept scoped — `true` is spec-valid, popup is
   role=group so no narrower token applies; axe cannot verify popup type.

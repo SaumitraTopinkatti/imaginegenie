@@ -14,7 +14,8 @@ import {
   inpaintCost,
   nearestAspect,
 } from "../lib/inpaint";
-import { BrushIcon, CopyIcon, DownloadIcon, GalleryIcon } from "./icons";
+import { BrushIcon, CloseIcon, CopyIcon, DownloadIcon, GalleryIcon } from "./icons";
+import { SHEET_MQ, useBottomSheet } from "../lib/useBottomSheet";
 
 export interface InpaintTabProps {
   hidden: boolean;
@@ -82,6 +83,17 @@ export default function InpaintTab({
   const editorHostRef = useRef<HTMLDivElement>(null);
   /** Measured canvas width at run start: the loader keeps this exact box. */
   const [loaderW, setLoaderW] = useState<number | null>(null);
+  // Mobile bottom sheet for the controls (same pattern as Studio's drawer).
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const peekRef = useRef<HTMLButtonElement>(null);
+  const { grabProps } = useBottomSheet({
+    open: sheetOpen,
+    setOpen: setSheetOpen,
+    sheetRef,
+    peekRef,
+    initialFocusSelector: "textarea",
+  });
   const lockRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -112,8 +124,12 @@ export default function InpaintTab({
   useEffect(() => {
     if (!hidden) return;
     setPickerOpen(false);
+    setSheetOpen(false);
     setDialogReset((k) => k + 1);
   }, [hidden]);
+  // Live sheet state for doInpaint (a useCallback would see a stale value).
+  const sheetOpenRef = useRef(sheetOpen);
+  sheetOpenRef.current = sheetOpen;
 
   // Source dimensions for the aspect notice + loader frame (ratio only;
   // the working grid preserves the source ratio).
@@ -251,6 +267,8 @@ export default function InpaintTab({
           onSaved(gen);
           setResult({ gen, beforeUrl: original });
           pushToast("ok", `Inpaint ready — ${fmtCost(res.cost)}.`);
+          // Mobile sheet closes on success, same as Studio's drawer.
+          if (window.matchMedia(SHEET_MQ).matches) setSheetOpen(false);
         } catch {
           setError("The image was generated but could not be saved. It is lost — try again.");
         }
@@ -258,7 +276,13 @@ export default function InpaintTab({
         if (e instanceof DOMException && e.name === "AbortError") {
           setError("Cancelled.");
         } else {
-          setError(e instanceof Error ? e.message : "Generation failed.");
+          const msg = e instanceof Error ? e.message : "Generation failed.";
+          setError(msg);
+          // The error box sits inside the sheet: if it is closed on mobile
+          // the user would never see it, so toast the same text instead.
+          if (window.matchMedia(SHEET_MQ).matches && !sheetOpenRef.current) {
+            pushToast("err", msg);
+          }
         }
       } finally {
         abortRef.current = null;
@@ -318,7 +342,36 @@ export default function InpaintTab({
       <main className="main-col">
         <section id="inpaint-main" tabIndex={-1} aria-label="Inpaint" hidden={hidden}>
           <div className="inpaint-layout">
-            <div className="panel inpaint-controls" onKeyDown={onPanelKey}>
+            <div
+              ref={sheetRef}
+              className={"panel inpaint-controls inpaint-sheet" + (sheetOpen ? " open" : "")}
+              onKeyDown={onPanelKey}
+            >
+              {/* Same sheet anatomy as Studio's composer: the dialog semantics
+                  live on this neutral wrapper so the panel never remounts. */}
+              <div
+                className="sheet-dialog"
+                {...(sheetOpen
+                  ? { role: "dialog", "aria-modal": true, "aria-label": "Inpaint controls" }
+                  : {})}
+              >
+              <div className="sheet-grab" {...grabProps}>
+                <span className="grab-handle" aria-hidden="true" />
+                <span className="grab-row">
+                  <span className="grab-label">
+                    <BrushIcon size={15} /> Inpaint
+                  </span>
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    aria-label="Close panel"
+                    onClick={() => setSheetOpen(false)}
+                  >
+                    <CloseIcon size={15} />
+                  </button>
+                </span>
+              </div>
+              <div className="inpaint-controls-body">
               <h2 className="panel-title">
                 Inpaint <span className="title-serif">edits</span>
               </h2>
@@ -465,6 +518,8 @@ export default function InpaintTab({
                   </button>
                 )}
               </div>
+              </div>
+              </div>
             </div>
             <div className="inpaint-editor">
               {!source ? (
@@ -571,6 +626,25 @@ export default function InpaintTab({
               )}
             </div>
           </div>
+          {/* mobile sheet chrome (inside the section so [hidden] removes it) */}
+          <button
+            ref={peekRef}
+            type="button"
+            className={sheetOpen ? "peek-bar peek-hidden" : "peek-bar"}
+            aria-hidden={sheetOpen}
+            tabIndex={sheetOpen ? -1 : 0}
+            onClick={() => setSheetOpen(true)}
+          >
+            <BrushIcon size={16} />{" "}
+            {generating ? `Generating · ${elapsed}s · tap to expand` : "Describe the edit · tap to expand"}
+          </button>
+          {sheetOpen && (
+            <div
+              className="sheet-backdrop"
+              aria-hidden="true"
+              onClick={() => setSheetOpen(false)}
+            />
+          )}
         </section>
       </main>
       {pickerOpen && (

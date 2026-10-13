@@ -713,7 +713,7 @@ html {
   .header-inner { padding: 12px 14px; }
   .shell { display: block; padding: 16px 14px calc(110px + env(safe-area-inset-bottom)); }
   .main-col { gap: 14px; }
-  .composer {
+  .composer, .inpaint-sheet {
     position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 90;
     width: auto; max-width: none; height: 86vh; height: 86dvh; max-height: none; min-height: 0;
     border-radius: 22px 22px 0 0;
@@ -727,7 +727,7 @@ html {
     visibility: hidden;
     transition: transform 0.34s cubic-bezier(0.32, 0.72, 0.24, 1), visibility 0s 0.36s;
   }
-  .composer.open {
+  .composer.open, .inpaint-sheet.open {
     transform: translateY(0);
     visibility: visible;
     transition: transform 0.34s cubic-bezier(0.32, 0.72, 0.24, 1), visibility 0s 0s;
@@ -906,7 +906,11 @@ html {
 
 /* ---------- Inpaint section (N6) ---------- */
 .inpaint-layout { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 24px; }
-.inpaint-controls { flex: 1 1 340px; max-width: 420px; min-width: 0; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+/* Outer shell is padding-free so the mobile grab runs edge to edge (same as
+   Studio's .composer); the body carries the padding on all viewports, which
+   keeps desktop pixel-identical. */
+.inpaint-controls { flex: 1 1 340px; max-width: 420px; min-width: 0; padding: 0; display: flex; flex-direction: column; }
+.inpaint-controls-body { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
 .inpaint-controls .prompt { min-height: 96px; }
 .inpaint-editor { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
 .inpaint-foot { margin-top: 0; padding: 0; border-top: 0; }
@@ -962,6 +966,9 @@ html {
 .lb-sent summary:hover { color: var(--teal-dark); }
 .lb-sent .lb-prompt { margin-top: 8px; }
 @media (max-width: 900px) {
+  /* Editor is the main view; the controls live in the fixed bottom sheet. */
   .inpaint-editor { order: -1; }
+  /* Must come after the desktop rule: same specificity, so without this the
+     desktop max-width: 420px caps the fixed sheet and leaves gutters. */
   .inpaint-controls { max-width: none; }
 }
