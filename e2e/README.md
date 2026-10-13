@@ -41,7 +41,7 @@ Ports (env-overridable): app 4190 (`E2E_APP_PORT`), mock API 4191
   the server is shared across parallel workers. Per-prompt counters keep
   `fail-nth` parallel-safe.
 - `mock-api/png.mjs` — deterministic PNG fixtures (zlib encoder, no binaries).
-- `a11y/states.spec.ts` — ~30 states × projects; emulation runs a subset;
+- `a11y/states.spec.ts` — 34 states × projects; emulation runs a subset;
   ARIA snapshots (`__aria__/`) assert on desktop only.
 - `a11y/allowlist.json` — known incompletes with justification (`color-contrast`
   + one scoped `aria-valid-attr-value` on `lib-menu-open`: `true` is spec-valid,
@@ -69,6 +69,9 @@ Ports (env-overridable): app 4190 (`E2E_APP_PORT`), mock API 4191
   size-preview visibility/fade/diameter, dab diameter. Cursor/wheel specs skip
   on coarse pointers. The picker + cursor specs were verified to fail with
   their fixes reverted.
+- `behavior/inpaint-layout.spec.ts` — tall-source sizing (N20): loader box ≈
+  measured canvas box, ≤70dvh and on-screen, page `scrollHeight` doesn't grow
+  during load; result lands at the painted canvas size.
 - `unit/inpaint-prompt.spec.ts` — pure prompt/aspect/cost contract, no `app`
   fixture, desktop only.
 - `real-store.spec.ts` — prod `dist/` smoke (no hook, boots, XOR-row decrypt).

@@ -14,6 +14,7 @@ Features:
 - Inpaint tab: pick a generation or reference, paint a red mask, describe the change ("replace this with a basketball") — the model edits only inside the mask and the unpainted area stays pixel-exact
 - Lightbox view for generated images
 - Encrypted IndexedDB store for generations and settings (key held in memory)
+- API-key modal with a truthful Test (checks `GET /key`, shows the key label + remaining limit) and paste-tolerant input (`Bearer ` prefix, quotes, and stray whitespace are cleaned automatically)
 
 ## Routes
 
