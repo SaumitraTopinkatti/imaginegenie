@@ -44,11 +44,14 @@ out.push(await scanState(page, "composer"));
 // State 2: references tab (open drawer, switch, scan, switch back)
 try {
   await page.getByRole("button", { name: /sections menu/i }).click();
-  await page.getByRole("button", { name: /^References/ }).click();
+  await page.getByRole("link", { name: /^References/ }).click();
   await page.locator(".refs-panel").waitFor({ timeout: 5000 });
+  // Drawer closes on switch (opacity/transform ~0.26s): scanning mid-fade
+  // reports a contrast failure no user ever rests on.
+  await page.waitForTimeout(400);
   out.push(await scanState(page, "references"));
   await page.getByRole("button", { name: /sections menu/i }).click();
-  await page.getByRole("button", { name: /^Studio/ }).click();
+  await page.getByRole("link", { name: /^Studio/ }).click();
   await page.locator("#gallery").waitFor({ timeout: 5000 });
 } catch (e) {
   console.log(`[references] not reachable (${e.message?.split("\n")[0]}) — skipped`);

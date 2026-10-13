@@ -14,6 +14,13 @@ test("production headers ship on the e2e bundle", async ({ page }) => {
   await expect(page.getByRole("textbox", { name: "Prompt", exact: true })).toBeVisible();
 });
 
+test("deep links serve index.html with production headers", async ({ page }) => {
+  const resp = await page.goto("/inpaint");
+  expect(resp?.status()).toBe(200);
+  expect(resp!.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
+  await expect(page.getByRole("heading", { name: /Inpaint/ })).toBeVisible();
+});
+
 test("loopback API is blocked by connect-src (documents the split)", async ({ page }) => {
   await page.goto("/");
   const blocked = await page.evaluate(async () => {

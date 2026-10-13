@@ -23,12 +23,18 @@ Ports (env-overridable): app 4190 (`E2E_APP_PORT`), mock API 4191
 ## Layout
 
 - `fixtures.ts` — `app` page (fresh context, guard, store reset), `mockApi`
-  client, `seedLibrary`, `gotoTab`, `fillKey`, `assertDialogContract`,
-  `assertLayeredEsc`, `scanState` (axe tags + allowlist + per-test JSON).
+  client, `seedLibrary`, `gotoTab` (studio/refs/inpaint), `fillKey`,
+  `paintStroke` (mouse drag; touch taps on coarse pointers),
+  `assertDialogContract`, `assertLayeredEsc`, `scanState` (axe tags +
+  allowlist + per-test JSON).
 - `mocks/secureStore.mock.ts` — every real export, in-memory + localStorage
   mirror (cross-tab sync works), `_apiCheck: typeof Real` fails `tsc` on drift.
   `window.__e2e__`: `seed` (returns ids) / `reset` / `setDegraded` / `markUnreadable` / `failNext`.
 - `mock-api/server.mjs` — node:http, 127.0.0.1 only, CORS incl. preflight.
+  Auth enforced like the real provider: `/images` and `/key` 401
+  (`Missing Authentication header`) when the bearer value is empty or not
+  `sk-or-`-prefixed — checked before any scenario, so no directive bypasses
+  it. `GET /api/v1/key` → `{data:{label, limit_remaining}}` for good keys.
   Scenario priority: prompt `[[mock:name,k=v]]` > key `sk-or-test-*` >
   `POST /__mock/scenario`. `GET /__mock/requests` log (auth redacted) —
   **filter by unique prompt marker** (`marker()`), never by global counts:
@@ -40,11 +46,31 @@ Ports (env-overridable): app 4190 (`E2E_APP_PORT`), mock API 4191
 - `a11y/allowlist.json` — known incompletes with justification (`color-contrast`
   + one scoped `aria-valid-attr-value` on `lib-menu-open`: `true` is spec-valid,
   popup is `role=group`, axe cannot verify popup type).
-- `keyboard/dialogs.spec.ts` — contract × 8 dialogs + menu/combobox/edit/skip/Ctrl+Enter.
+- `keyboard/dialogs.spec.ts` — contract × 10 dialogs + menu/combobox/edit/skip/Ctrl+Enter.
 - `emulation/matrix.spec.ts` — viewport reflow, 1.4.12 spacing, target-size sweep
-  (opacity-0 controls excluded; see limits).
+  (opacity-0 and closed-`<details>` controls excluded; see limits).
 - `behavior/` — generate fan-out/errors/cancel/reveal, key flows, backup round
   trip, cross-tab sync, degraded pre-POST block.
+- `behavior/api-key.spec.ts` — `Bearer `/quote/whitespace normalisation in
+  the field, warn-without-block on non-`sk-or-` shape, truthful Test via
+  `GET /key` (label + limit), mangled-key Studio + Inpaint generates with a
+  clean header, garbage-key 401 copy. Verified to fail with normalisation
+  reverted.
+- `behavior/inpaint.spec.ts` — inpaint wrap + ref order (2 default, 1 with knob),
+  guards (zero requests), cancel, mid-flight tab switch, overlay tint uniformity,
+  pixel-exact composite pixels, entry points, undo/redo gating, backup survival.
+- `behavior/routing.spec.ts` — deep-link landing (title, skip link,
+  `aria-current`, real `href`), back/forward, unknown-path normalisation,
+  `/inpaint?src=` resolution for generations + references, missing-id toast +
+  URL cleanup.
+- `behavior/inpaint-fixes.spec.ts` — picker surface (opaque, ≥600px, internal
+  scroll, captions), 200-char source label containment, brush-ring/pointer
+  alignment (±1px, incl. after page scroll), wheel sizing without page scroll,
+  size-preview visibility/fade/diameter, dab diameter. Cursor/wheel specs skip
+  on coarse pointers. The picker + cursor specs were verified to fail with
+  their fixes reverted.
+- `unit/inpaint-prompt.spec.ts` — pure prompt/aspect/cost contract, no `app`
+  fixture, desktop only.
 - `real-store.spec.ts` — prod `dist/` smoke (no hook, boots, XOR-row decrypt).
 - `csp.spec.ts` — header parity on `dist-e2e` under production headers.
 
@@ -75,7 +101,10 @@ Ports (env-overridable): app 4190 (`E2E_APP_PORT`), mock API 4191
 - `ok-webp`/`ok-jpeg` serve PNG bytes with a webp/jpeg label (decoders sniff;
   only the tag text is asserted).
 - Hover-only card controls (M1, opacity 0) are excluded from the target-size
-  sweep.
+  sweep, as is content inside closed `<details>` (keeps layout boxes in some
+  engines while hidden and non-interactive).
+- Aria snapshots pin wall-clock text (`Oct \d+, \d+:\d+`): the meridiem is
+  matched as `(AM|PM)` so states stay green morning and afternoon.
 - Menu-launched dialogs (backup/restore/clear) return focus to the Library
   menu trigger via `Dialog returnFocusRef`; the restore picker-cancel path
   pre-focuses the trigger (no dialog opens). Success landings: clear →

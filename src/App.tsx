@@ -3,7 +3,9 @@ import {
   ASPECT_RATIOS,
   MODEL,
   generateImage,
+  looksLikeOpenRouterKey,
   maskKey,
+  normalizeApiKey,
   testKey,
   type Resolution,
 } from "./lib/openrouter";
@@ -40,6 +42,7 @@ import {
 } from "./lib/secureStore";
 import {
   AlertIcon,
+  BrushIcon,
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -60,26 +63,22 @@ import {
   UploadIcon,
 } from "./components/icons";
 import ReferencesTab from "./components/ReferencesTab";
+import InpaintTab from "./components/InpaintTab";
+import type { Generation, InpaintSource } from "./lib/types";
+import {
+  TAB_PATHS,
+  inpaintSrcParam,
+  parseInpaintSrc,
+  tabFromPath,
+  type InpaintSrcRef,
+  type TabId,
+} from "./lib/route";
+import { listReferenceThumbs, loadReferenceImage } from "./lib/library";
 import DenoiseFrame from "./components/DenoiseFrame";
 import Dialog, { hasOpenDialog } from "./components/Dialog";
 import logoUrl from "./assets/logo.png";
 
 /* ---------- types & constants ---------- */
-
-interface Generation {
-  id: string;
-  createdAt: number;
-  prompt: string;
-  aspectRatio: string;
-  resolution: string;
-  cost: number;
-  mediaType: string;
-  refCount: number;
-  seed?: number;
-  imageUrl: string;
-  thumbUrl: string;
-  refUrls: string[];
-}
 
 interface Toast {
   id: number;
@@ -150,16 +149,16 @@ function aspectCss(label: string): string {
 }
 const PRICE_1K = 0.045;
 const PRICE_2K = 0.09;
-type TabId = "studio" | "refs";
 const TABS: Array<{ id: TabId; label: string; Icon: (props: { size?: number }) => JSX.Element }> = [
   { id: "studio", label: "Studio", Icon: GalleryIcon },
   { id: "refs", label: "References", Icon: FolderIcon },
+  { id: "inpaint", label: "Inpaint", Icon: BrushIcon },
 ];
 
 function loadKey(): string {
   try {
     const env = (import.meta as unknown as { env: Record<string, string | undefined> }).env;
-    return env.VITE_OPENROUTER_API_KEY || "";
+    return normalizeApiKey(env.VITE_OPENROUTER_API_KEY || "");
   } catch {
     return "";
   }
@@ -200,20 +199,24 @@ interface GenCardProps {
  * lightbox, action buttons are siblings. No nested interactives, no key
  * forwarding — inner buttons keep their native Enter/Space behaviour. */
 function GenCard({ g, index, reveal = false, onOpen, onRetry, onCopy, onDownload, onDelete }: GenCardProps) {
+  // Inpaint records show the user's instruction (the stored prompt is the
+  // wrapped provider prompt) plus an Inpaint tag.
+  const snippet = g.inpaint?.instruction || g.prompt;
   return (
     <article className={reveal ? "card reveal" : "card"}>
       <button
         type="button"
         className={reveal ? "thumb r-img" : "thumb"}
-        aria-label={`Open image ${index}: ${g.prompt.slice(0, 120) || "Generated image"}`}
+        aria-label={`Open image ${index}: ${snippet.slice(0, 120) || "Generated image"}`}
         onClick={() => onOpen(g)}
       >
         <img src={g.thumbUrl} alt="" loading="lazy" />
         <span className="cost-tag">{fmtCost(g.cost)}</span>
       </button>
       <div className="body">
-        <div className={reveal ? "prompt-snippet r-prompt" : "prompt-snippet"}>{g.prompt}</div>
+        <div className={reveal ? "prompt-snippet r-prompt" : "prompt-snippet"}>{snippet}</div>
         <div className={reveal ? "meta r-meta" : "meta"}>
+          {g.inpaint && <span className="tag hl">Inpaint</span>}
           <span className="tag">{g.aspectRatio}</span>
           <span className="tag">{g.resolution}</span>
           <span className="tag">{g.mediaType.replace("image/", "")}</span>
@@ -359,24 +362,78 @@ export default function App() {
   const importInput = useRef<HTMLInputElement>(null);
 
   /* ----- tabs ----- */
-  const [tab, setTab] = useState<TabId>("studio");
+  // Initial render reads the URL so a deep link never flashes Studio first.
+  const [tab, setTab] = useState<TabId>(() => tabFromPath(window.location.pathname) ?? "studio");
   const [navOpen, setNavOpen] = useState(false);
   const navRef = useRef<HTMLElement>(null);
   const navToggleRef = useRef<HTMLButtonElement>(null);
   const galleryRef = useRef<HTMLElement>(null);
-  /** Switch sections from the side drawer (drawer closes on pick). */
-  const selectTab = (id: TabId) => {
+  /** Deep-linkable part of the inpaint URL (D18): kept in a ref, reported by
+   *  InpaintTab via onInpaintSourceChange and set by entry points. */
+  const inpaintSrcKey = useRef<{ kind: string; id?: string } | null>(null);
+  /** Single funnel for every tab switch (routing rule): state + URL move
+   *  together. Never call setTab directly. */
+  const goTo = useCallback((id: TabId, opts?: { replace?: boolean }) => {
     setTab(id);
     setNavOpen(false);
-  };
+    const want =
+      id === "inpaint" ? `/inpaint${inpaintSrcParam(inpaintSrcKey.current)}` : TAB_PATHS[id];
+    const cur = window.location.pathname + window.location.search;
+    if (cur !== want) {
+      if (opts?.replace) window.history.replaceState(null, "", want);
+      else window.history.pushState(null, "", want);
+    }
+  }, []);
   /* ----- expose active tab for page-scroll locking (studio locks, refs scrolls) ----- */
   useEffect(() => {
     document.body.dataset.tab = tab;
     document.title =
-      tab === "studio" ? "ImagineGenie — Studio" : "ImagineGenie — References";
+      tab === "studio"
+        ? "ImagineGenie — Studio"
+        : tab === "refs"
+          ? "ImagineGenie — References"
+          : "ImagineGenie — Inpaint";
   }, [tab]);
-  /* ----- land focus in the new section after switch (never steal it on load) ----- */
+  /* ----- land focus in the new section after switch (never steal it on load).
+     Inpaint mounts one commit after its first switch (D10): re-run then. ----- */
   const firstTabRender = useRef(true);
+  /* ----- inpaint stays mounted after first visit (D10): tab switches must not
+     wipe strokes or orphan a paid result; hidden when inactive ----- */
+  const [inpaintSeen, setInpaintSeen] = useState(
+    () => tabFromPath(window.location.pathname) === "inpaint"
+  );
+  // Unknown path → Studio + canonical URL (never strand on a dead route).
+  useEffect(() => {
+    if (tabFromPath(window.location.pathname) === null) {
+      window.history.replaceState(null, "", "/");
+    }
+  }, []);
+  // Back/forward: URL is the source of truth. Dialogs portal to body so they
+  // survive the section going hidden — InpaintTab closes its own on hide.
+  const [deepSrc, setDeepSrc] = useState<InpaintSrcRef | null>(() =>
+    tabFromPath(window.location.pathname) === "inpaint"
+      ? parseInpaintSrc(window.location.search)
+      : null
+  );
+  useEffect(() => {
+    const onPop = () => {
+      const t = tabFromPath(window.location.pathname);
+      if (!t) {
+        window.history.replaceState(null, "", "/");
+        setTab("studio");
+        setNavOpen(false);
+        return;
+      }
+      setTab(t);
+      setNavOpen(false);
+      setDeepSrc(t === "inpaint" ? parseInpaintSrc(window.location.search) : null);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  useEffect(() => {
+    if (tab === "inpaint") setInpaintSeen(true);
+  }, [tab]);
   useEffect(() => {
     if (firstTabRender.current) {
       firstTabRender.current = false;
@@ -385,9 +442,11 @@ export default function App() {
     const el =
       tab === "studio"
         ? galleryRef.current
-        : (document.getElementById("ref-library") as HTMLElement | null);
+        : (document.getElementById(
+            tab === "refs" ? "ref-library" : "inpaint-main"
+          ) as HTMLElement | null);
     el?.focus({ preventScroll: true });
-  }, [tab]);
+  }, [tab, inpaintSeen]);
   const [referenceCount, setReferenceCount] = useState(0);
   const [showMoreShapes, setShowMoreShapes] = useState(false);
   const [libMenuOpen, setLibMenuOpen] = useState(false);
@@ -399,12 +458,15 @@ export default function App() {
   /* ----- key resolution: working copy first, encrypted store on demand.
      Plaintext exists only while the modal is open or a request runs. ----- */
   const resolveKey = useCallback(async (): Promise<string> => {
-    if (apiKey.trim()) return apiKey.trim();
+    // Normalise on the way out: an already-stored mangled copy ("Bearer …",
+    // quotes, whitespace) heals on use without re-entry.
+    const clean = normalizeApiKey(apiKey);
+    if (clean) return clean;
     if (!rememberKey) return "";
     try {
       const stored = await loadApiKeyPayload();
       if (!stored) return "";
-      return await decryptText(stored);
+      return normalizeApiKey(await decryptText(stored));
     } catch {
       return "";
     }
@@ -440,7 +502,7 @@ export default function App() {
     return () => {
       document.removeEventListener("keydown", onKey);
       // Return focus to the hamburger when the drawer owned it (section
-      // switches move focus to the section instead via selectTab).
+      // switches move focus to the section instead via goTo).
       const active = document.activeElement;
       if (active && navRef.current?.contains(active)) {
         navToggleRef.current?.focus({ preventScroll: true });
@@ -541,6 +603,7 @@ export default function App() {
               imageUrl,
               thumbUrl,
               refUrls,
+              inpaint: r.inpaint,
             });
           } catch {
             // Undecryptable (key missing or corrupt): counted, never silent.
@@ -588,13 +651,16 @@ export default function App() {
      Deletion happens only via explicit uncheck (encrypted copy stays as the
      store of record when the working copy is dropped on modal close). ----- */
   useEffect(() => {
-    if (!rememberKey || !apiKey.trim()) return;
+    const clean = normalizeApiKey(apiKey);
+    if (!rememberKey || !clean) return;
     // Degraded (no AES): refuse the encrypted copy — the key stays tab-only.
     if (cryptoMode() !== "AES-GCM-256") return;
     let cancelled = false;
     void (async () => {
       try {
-        const payload = await encryptText(apiKey.trim());
+        // Persist the normalised value only: a sanitised key replaces any
+        // mangled stored copy the next time it's saved.
+        const payload = await encryptText(clean);
         if (!cancelled) await saveApiKeyPayload(payload);
       } catch {
         /* keep the in-memory key; persistence just skips a beat */
@@ -695,8 +761,10 @@ export default function App() {
     setTesting(true);
     setKeyMsg({ text: "", kind: "" });
     try {
-      await testKey(key);
-      setKeyMsg({ text: "Works — your key is valid.", kind: "ok" });
+      const info = await testKey(key);
+      const label = info.label !== "" ? `key "${info.label}" accepted` : "key accepted";
+      const limit = info.limitRemaining !== null ? ` (limit remaining: ${info.limitRemaining})` : "";
+      setKeyMsg({ text: `Works — ${label}${limit}.`, kind: "ok" });
     } catch (e) {
       setKeyMsg({ text: e instanceof Error ? e.message : "Connection failed.", kind: "err" });
     } finally {
@@ -1258,20 +1326,87 @@ export default function App() {
 
   /** From the References tab: load into the composer and jump back to Studio. */
   const useReference = (imageUrl: string) => {
-    setTab("studio");
+    goTo("studio");
     reuseRefs([imageUrl]);
   };
 
-  /* switching tabs tears down composer-scoped UI */
+  /* ----- inpaint entry points (N5): lightbox + full-size viewer land here ----- */
+  const [inpaintSource, setInpaintSource] = useState<InpaintSource | null>(null);
+  const enterInpaint = (s: InpaintSource) => {
+    setInpaintSource(s);
+    setLightbox(null);
+    setViewRef(null);
+    inpaintSrcKey.current = { kind: s.kind, id: s.id };
+    goTo("inpaint");
+  };
+  /** InpaintTab reports source changes so the URL stays deep-linkable. */
+  const onInpaintSourceChange = useCallback((s: { kind: string; id?: string } | null) => {
+    inpaintSrcKey.current = s;
+  }, []);
+  /* ----- deep-link source (D18): resolve ?src= after the library loads, then
+     feed it through the existing pendingSource path (discard confirm kept) ----- */
+  const deepResolved = useRef<string | null>(null);
+  useEffect(() => {
+    if (deepSrc === null || historyLoading) return;
+    const key = `${deepSrc.kind}:${deepSrc.id}`;
+    if (deepResolved.current === key) return;
+    deepResolved.current = key;
+    if (deepSrc.kind === "generation") {
+      const g = generations.find((x) => x.id === deepSrc.id);
+      if (g) {
+        setInpaintSource({
+          url: g.imageUrl,
+          kind: "generation",
+          id: g.id,
+          label: (g.inpaint?.instruction || g.prompt).slice(0, 60),
+        });
+      } else {
+        pushToast("info", "That image isn't in the library anymore.");
+        window.history.replaceState(null, "", "/inpaint");
+      }
+      return;
+    }
+    void (async () => {
+      try {
+        const thumbs = await listReferenceThumbs();
+        const url = await loadReferenceImage(deepSrc.id);
+        setInpaintSource({
+          url,
+          kind: "reference",
+          id: deepSrc.id,
+          label: thumbs.find((t) => t.id === deepSrc.id)?.name || "Reference",
+        });
+      } catch {
+        pushToast("info", "That image isn't in the library anymore.");
+        window.history.replaceState(null, "", "/inpaint");
+      }
+    })();
+  }, [deepSrc, historyLoading, generations, pushToast]);
+  /** Merge an inpaint result by id: a focus reload may already list it. */
+  const handleInpaintSaved = useCallback((gen: Generation) => {
+    setGenerations((prev) => (prev.some((x) => x.id === gen.id) ? prev : [gen, ...prev]));
+    broadcastLibChanged();
+  }, []);
+  const openInStudio = (g: Generation) => {
+    goTo("studio");
+    // The tab-switch effect clears the lightbox on commit: open after it.
+    requestAnimationFrame(() => setLightbox(g));
+  };
+
+  /* switching tabs tears down composer-scoped UI (dialogs portal to body, so
+     the full-size viewer must close here; InpaintTab closes its own) */
   useEffect(() => {
     setDrawerOpen(false);
     setLightbox(null);
+    setViewRef(null);
   }, [tab]);
 
   const filtered = useMemo(() => {    const q = search.trim().toLowerCase();
     return generations.filter((g) => {
       if (aspectFilter !== "all" && g.aspectRatio !== aspectFilter) return false;
-      if (q && !g.prompt.toLowerCase().includes(q)) return false;
+      // Inpaint records store the wrapped provider prompt: search the
+      // user's instruction instead of the wrapper boilerplate.
+      if (q && !(g.inpaint?.instruction ?? g.prompt).toLowerCase().includes(q)) return false;
       return true;
     });
   }, [generations, search, aspectFilter]);
@@ -1346,8 +1481,11 @@ export default function App() {
 
   return (
     <div>
-      <a href={tab === "studio" ? "#gallery" : "#ref-library"} className="skip-link">
-        {tab === "studio" ? "Skip to gallery" : "Skip to references"}
+      <a
+        href={tab === "studio" ? "#gallery" : tab === "refs" ? "#ref-library" : "#inpaint-main"}
+        className="skip-link"
+      >
+        {tab === "studio" ? "Skip to gallery" : tab === "refs" ? "Skip to references" : "Skip to inpaint"}
       </a>
       {/* header */}
       <header className="header">
@@ -1443,12 +1581,18 @@ export default function App() {
           Sections
         </p>
         {TABS.map((t) => (
-          <button
+          <a
             key={t.id}
-            type="button"
+            href={t.id === "inpaint" ? `/inpaint${inpaintSrcParam(inpaintSrcKey.current)}` : TAB_PATHS[t.id]}
             className="drawer-item"
             aria-current={tab === t.id ? "page" : undefined}
-            onClick={() => selectTab(t.id)}
+            onClick={(e) => {
+              // Plain left click navigates client-side; modified/middle
+              // clicks fall through so open-in-new-tab and copy-link work.
+              if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+              e.preventDefault();
+              goTo(t.id);
+            }}
             tabIndex={navOpen ? 0 : -1}
           >
             <t.Icon size={16} />
@@ -1456,7 +1600,7 @@ export default function App() {
             {t.id === "refs" && referenceCount > 0 && (
               <span className="tab-count">{referenceCount}</span>
             )}
-          </button>
+          </a>
         ))}
       </nav>
 
@@ -1738,7 +1882,7 @@ export default function App() {
                 <button
                   type="button"
                   className="lib-link"
-                  onClick={() => setTab("refs")}
+                  onClick={() => goTo("refs")}
                 >
                   <GalleryIcon size={14} /> Open reference library
                   {referenceCount > 0 && <span className="tab-count">{referenceCount}</span>}
@@ -2107,6 +2251,22 @@ export default function App() {
         </div>
       )}
 
+      {/* inpaint: mounted once, kept hidden when inactive (D10) */}
+      {inpaintSeen && (
+        <InpaintTab
+          hidden={tab !== "inpaint"}
+          generations={generations}
+          resolveKey={resolveKey}
+          pushToast={pushToast}
+          degraded={degraded}
+          onSaved={handleInpaintSaved}
+          onOpenInStudio={openInStudio}
+          pendingSource={inpaintSource}
+          onConsumeSource={() => setInpaintSource(null)}
+          onSourceChange={onInpaintSourceChange}
+        />
+      )}
+
       {/* mobile drawer chrome */}
       {tab === "studio" && (
         <>
@@ -2145,7 +2305,20 @@ export default function App() {
             />
             <div className="lb-side">
               <h3>Generation</h3>
-              <div className="lb-prompt">{lightbox.prompt}</div>
+              {lightbox.inpaint ? (
+                <>
+                  <div className="lb-prompt">{lightbox.inpaint.instruction}</div>
+                  <div className="meta" style={{ margin: "8px 0 0" }}>
+                    <span className="tag hl">Inpaint</span>
+                  </div>
+                  <details className="lb-sent">
+                    <summary>Prompt sent</summary>
+                    <div className="lb-prompt">{lightbox.prompt}</div>
+                  </details>
+                </>
+              ) : (
+                <div className="lb-prompt">{lightbox.prompt}</div>
+              )}
               <div className="lb-grid">
                 <div className="lb-stat">
                   <small>Cost</small>
@@ -2271,6 +2444,20 @@ export default function App() {
                 <button
                   type="button"
                   className="btn btn-small"
+                  onClick={() =>
+                    enterInpaint({
+                      url: lightbox.imageUrl,
+                      kind: "generation",
+                      id: lightbox.id,
+                      label: (lightbox.inpaint?.instruction || lightbox.prompt).slice(0, 60),
+                    })
+                  }
+                >
+                  <BrushIcon size={14} /> Inpaint
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-small"
                   onClick={() => retryGen(lightbox)}
                 >
                   <HistoryIcon size={14} /> Retry
@@ -2320,6 +2507,13 @@ export default function App() {
                 onClick={() => reuseRefs([viewRef])}
               >
                 <UploadIcon size={14} /> Load into composer
+              </button>
+              <button
+                type="button"
+                className="btn btn-small"
+                onClick={() => enterInpaint({ url: viewRef, kind: "image", label: "Reference image" })}
+              >
+                <BrushIcon size={14} /> Inpaint
               </button>
               <button
                 type="button"
@@ -2478,7 +2672,7 @@ export default function App() {
                 value={apiKey}
                 autoComplete="off"
                 spellCheck={false}
-                onChange={(e) => setApiKey(e.target.value)}
+                onChange={(e) => setApiKey(normalizeApiKey(e.target.value))}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") void doTest();
                 }}
@@ -2493,6 +2687,11 @@ export default function App() {
                 {showKey ? <EyeOffIcon size={17} /> : <EyeIcon size={17} />}
               </button>
             </div>
+            {!looksLikeOpenRouterKey(apiKey) && (
+              <div className="key-hint" role="status">
+                This doesn&rsquo;t look like an OpenRouter key (they start with sk-or-).
+              </div>
+            )}
             <div className={keyMsg.kind === "err" ? "key-status err" : "key-status ok"} role={keyMsg.kind === "err" ? "alert" : "status"}>
               {keyMsg.text}
             </div>

@@ -66,10 +66,27 @@ test("target-size sweep: visible controls meet 24px or spacing", async ({ app })
   });
   await gotoTab(app, "refs");
   await gotoTab(app, "studio");
-  const small = await app.evaluate(() => {
+  expect(await visibleTargetViolations(app), "undersized visible targets without spacing").toEqual([]);
+});
+
+test("target-size sweep: inpaint editor controls", async ({ app }) => {
+  await seedLibrary(app, { records: [{ prompt: "Inpaint targets" }] });
+  await app.reload();
+  await gotoTab(app, "inpaint");
+  await app.getByRole("button", { name: /Choose image|Change image/ }).first().click();
+  await app.getByRole("button", { name: /^Use image:/ }).first().click();
+  await expect(app.locator(".mask-overlay")).toBeVisible({ timeout: 8000 });
+  expect(await visibleTargetViolations(app), "undersized inpaint targets without spacing").toEqual([]);
+});
+
+async function visibleTargetViolations(app: Page): Promise<string[]> {
+  return app.evaluate(() => {
+    // Closed <details> content keeps layout boxes in some engines while being
+    // neither visible nor interactive: skip it like display:none.
     const els = [...document.querySelectorAll("button, a[href], input, select, [role=button]")].filter(
       (el) => {
         const h = el as HTMLElement;
+        if (h.closest("details:not([open])")) return false;
         const cs = getComputedStyle(h);
         if (cs.opacity === "0" || cs.visibility === "hidden" || cs.display === "none") return false;
         const r = h.getBoundingClientRect();
@@ -96,5 +113,4 @@ test("target-size sweep: visible controls meet 24px or spacing", async ({ app })
     });
     return bad;
   });
-  expect(small, "undersized visible targets without spacing").toEqual([]);
-});
+}

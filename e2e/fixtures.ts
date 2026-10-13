@@ -116,20 +116,24 @@ export async function seedLibrary(page: Page, opts: SeedOpts) {
   return ids as { recordIds: string[]; referenceIds: string[] };
 }
 
-export async function gotoTab(page: Page, tab: "studio" | "refs") {
+export async function gotoTab(page: Page, tab: "studio" | "refs" | "inpaint") {
   // A open mobile sheet + backdrop would intercept the menu: close it first.
   if (await page.getByRole("dialog", { name: "Image composer" }).isVisible()) {
     await page.keyboard.press("Escape");
   }
   if (tab === "refs") {
     await page.getByRole("button", { name: /sections menu/i }).click();
-    await page.getByRole("button", { name: /^References/ }).click();
+    await page.getByRole("link", { name: /^References/ }).click();
     await page.locator("#ref-library").waitFor({ timeout: 8000 });
+  } else if (tab === "inpaint") {
+    await page.getByRole("button", { name: /sections menu/i }).click();
+    await page.getByRole("link", { name: /^Inpaint/ }).click();
+    await page.locator("#inpaint-main").waitFor({ timeout: 8000 });
   } else {
     const menu = page.getByRole("button", { name: /sections menu/i });
     if (await menu.isVisible()) {
       await menu.click();
-      await page.getByRole("button", { name: /^Studio/ }).click();
+      await page.getByRole("link", { name: /^Studio/ }).click();
     }
     await page.locator("#gallery").waitFor({ timeout: 8000 });
   }
@@ -168,7 +172,40 @@ export async function awaitRevealSettled(page: Page) {
   await expect(page.locator(".reveal")).toHaveCount(0, { timeout: 15000 });
 }
 
-/* ---------- dialog contract (all 8 Dialogs) ---------- */
+/**
+ * Paint one stroke across the inpaint mask canvas. Mouse drag on fine
+ * pointers; a tap (exercises the touch dab path) on coarse pointers.
+ */
+export async function paintStroke(
+  page: Page,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  steps = 8
+) {
+  // The sticky header can cover a scrolled-under canvas top: centre it first,
+  // then measure fresh (boundingBox is viewport-relative).
+  await page.locator(".mask-overlay").evaluate((el) => el.scrollIntoView({ block: "center" }));
+  const box = await page.locator(".mask-overlay").boundingBox();
+  if (!box) throw new Error("mask canvas not visible");
+  const px = (fx: number) => box.x + box.width * fx;
+  const py = (fy: number) => box.y + box.height * fy;
+  const coarse = await page.evaluate(() => window.matchMedia("(pointer: coarse)").matches);
+  if (coarse) {
+    // Touch taps stamp dabs (single-pointer path): endpoints + midpoint.
+    await page.touchscreen.tap(px(from.x), py(from.y));
+    await page.touchscreen.tap(px((from.x + to.x) / 2), py((from.y + to.y) / 2));
+    await page.touchscreen.tap(px(to.x), py(to.y));
+    return;
+  }
+  await page.mouse.move(px(from.x), py(from.y));
+  await page.mouse.down();
+  for (let i = 1; i <= steps; i++) {
+    await page.mouse.move(px(from.x + ((to.x - from.x) * i) / steps), py(from.y + ((to.y - from.y) * i) / steps));
+  }
+  await page.mouse.up();
+}
+
+/* ---------- dialog contract (all 10 Dialogs) ---------- */
 
 export interface DialogContract {
   /** Opens the dialog (already focused opener preferred). */

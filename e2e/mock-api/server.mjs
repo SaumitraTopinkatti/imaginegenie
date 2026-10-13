@@ -1,11 +1,16 @@
 // Mock OpenRouter API for e2e tests. Dependency-free node:http, loopback
 // only, never forwards anywhere. `node e2e/mock-api/server.mjs [--port N]`
 //
+// Auth (mirrors the real provider): /images and /key return 401
+//   {"error":{"message":"Missing Authentication header","code":401}} when the
+//   bearer value is empty or doesn't start with sk-or-. Checked FIRST, so no
+//   scenario or directive can bypass it.
 // Scenario selection (priority order):
 //   1. Prompt directive  [[mock:<scenario>[,key=value...]]] anywhere in the prompt
 //   2. API key value     (sk-or-test-ok / -401 / -402 / -429 / -500 ...)
 //   3. POST /__mock/scenario {scenario} global default (POST /__mock/reset clears)
 // Control: GET /__mock/requests (log), DELETE /__mock/requests (clear).
+// Key check: GET /api/v1/key -> {data:{label, limit_remaining}} (D23).
 import { createServer } from "node:http";
 import { pngBuffer } from "./png.mjs";
 
@@ -59,6 +64,24 @@ function keyKind(auth) {
   if (!key) return "missing";
   if (KEY_SCENARIOS[key]) return key;
   return "other";
+}
+
+/** Bearer value the client sent ("" when absent). Secret values never logged. */
+function bearerKey(auth) {
+  const m = /^Bearer\s+(.+)$/.exec(auth || "");
+  return m ? m[1].trim() : "";
+}
+
+/** D25: empty or non-sk-or- bearer → 401, like the real provider. */
+function authRejected(auth) {
+  const key = bearerKey(auth);
+  return key === "" || !key.startsWith("sk-or-");
+}
+
+function unauth(res, entry) {
+  entry.scenario = "unauth";
+  entry.via = "auth";
+  send(res, 401, { error: { message: "Missing Authentication header", code: 401 } });
 }
 
 function scenarioFor(body, auth) {
@@ -193,6 +216,11 @@ const server = createServer(async (req, res) => {
   });
 
   if (req.method === "POST" && url.pathname === "/api/v1/images") {
+    if (authRejected(auth)) {
+      unauth(res, entry);
+      pushLog();
+      return;
+    }
     const { scenario, params, via } = scenarioFor(body, auth);
     const counterKey = `${scenario}|${JSON.stringify(params)}|${body?.prompt ?? ""}`;
     const n = (counters.get(counterKey) ?? 0) + 1;
@@ -283,7 +311,12 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === "GET" && url.pathname.startsWith("/api/v1/images/models/")) {
+  if (req.method === "GET" && url.pathname === "/api/v1/key") {
+    if (authRejected(auth)) {
+      unauth(res, entry);
+      pushLog();
+      return;
+    }
     const kk = keyKind(auth);
     entry.via = "key";
     if (KEY_SCENARIOS[kk] && KEY_SCENARIOS[kk] !== "ok") {
@@ -293,23 +326,9 @@ const server = createServer(async (req, res) => {
       send(res, st, { error: { message: ERROR_MESSAGES[st] || "error", code: st } });
       return;
     }
-    if (globalScenario === "endpoints-empty") {
-      entry.scenario = globalScenario;
-      pushLog();
-      send(res, 200, { data: { endpoints: [] } });
-      return;
-    }
-    if (globalScenario === "endpoints-nonjson") {
-      entry.scenario = globalScenario;
-      pushLog();
-      send(res, 200, "not json", "application/json");
-      return;
-    }
     entry.scenario = "ok";
     pushLog();
-    send(res, 200, {
-      data: { endpoints: [{ pricing: { prompt: "0.000045", image: "0.045" } }] },
-    });
+    send(res, 200, { data: { label: "mock key", limit_remaining: 10 } });
     return;
   }
 

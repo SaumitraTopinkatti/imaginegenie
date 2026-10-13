@@ -1,0 +1,16 @@
+- region "Inpaint":
+  - heading "Inpaint edits" [level=2]
+  - paragraph: Paint what to change in red, describe it, generate. Everything outside the paint stays as it is.
+  - text: Source image
+  - button "Choose image"
+  - text: /Instruction 0\/\d+/
+  - textbox "Inpaint instruction":
+    - /placeholder: Replace this with a shiny basketball
+  - text: Resolution
+  - group "Resolution":
+    - button /[\d,.]+[bkmBKM]+ \$\d+\.\d+ \/ image/ [pressed]
+    - button /[\d,.]+[bkmBKM]+ \$\d+\.\d+ \/ image/
+  - group: Advanced
+  - button /Generate · \$\d+\.\d+/
+  - paragraph: No image yet. Choose one from Generations or References to start painting.
+  - button "Choose image"

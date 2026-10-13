@@ -11,8 +11,17 @@ Features:
 - Composer with model picker, prompt, aspect ratio, resolution, and reference image inputs
 - Gallery with filters and cost tracking
 - References library tab for reusable reference images
+- Inpaint tab: pick a generation or reference, paint a red mask, describe the change ("replace this with a basketball") — the model edits only inside the mask and the unpainted area stays pixel-exact
 - Lightbox view for generated images
 - Encrypted IndexedDB store for generations and settings (key held in memory)
+
+## Routes
+
+Each section has its own URL (History API, no router library): `/` Studio,
+`/references`, `/inpaint` (optional `?src=gen:<id>` / `?src=ref:<id>` deep
+link that restores the source image after a refresh — strokes are never
+persisted). Back/forward switch sections; unknown paths land on `/`.
+Deploys need the SPA fallback in `public/_redirects` (`/* /index.html 200`).
 
 ## Setup
 

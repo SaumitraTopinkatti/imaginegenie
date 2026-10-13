@@ -65,7 +65,7 @@ test("cancel mid-flight aborts the request", async ({ app }) => {
 });
 
 for (const [key, text] of [
-  ["sk-or-test-401", "Invalid API key"],
+  ["sk-or-test-401", "Key rejected"],
   ["sk-or-test-402", "Insufficient balance"],
   ["sk-or-test-429", "Rate limited"],
   ["sk-or-test-500", "Provider error"],

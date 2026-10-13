@@ -15,6 +15,8 @@ export interface EncryptedPayload {
   alg: "AES-GCM-256" | "XOR";
 }
 
+import type { InpaintMeta } from "./types";
+
 export interface StoredRecord {
   id: string;
   createdAt: number;
@@ -28,6 +30,8 @@ export interface StoredRecord {
   imageEnc: EncryptedPayload;
   thumbEnc: EncryptedPayload;
   refsEnc?: EncryptedPayload[];
+  /** Inpaint metadata (optional so old rows read unchanged; backup spreads ...r). */
+  inpaint?: InpaintMeta;
 }
 
 /**

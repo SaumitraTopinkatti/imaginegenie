@@ -233,6 +233,15 @@ export function EditIcon(props: IconProps) {
   );
 }
 
+export function BrushIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 20l1-4L16.5 4.5a1.8 1.8 0 0 1 2.5 0l.5.5a1.8 1.8 0 0 1 0 2.5L8 19l-4 1z" />
+      <path d="M14.5 6.5l3 3" />
+    </Svg>
+  );
+}
+
 export function FolderIcon(props: IconProps) {
   return (
     <Svg {...props}>

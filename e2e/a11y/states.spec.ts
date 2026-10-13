@@ -3,7 +3,7 @@
 // Emulation projects (reduced-motion, forced-colors) run a subset; ARIA
 // snapshots assert on desktop only. Roles/names only — no test ids.
 import type { Page } from "@playwright/test";
-import { test, expect, scanState, seedLibrary, gotoTab, fillKey, openKeyModal, ensureComposerOpen, awaitRevealSettled, marker } from "../fixtures";
+import { test, expect, scanState, seedLibrary, gotoTab, fillKey, openKeyModal, ensureComposerOpen, awaitRevealSettled, paintStroke, marker } from "../fixtures";
 import { pngDataUrl } from "../mock-api/png.mjs";
 
 const EMU_SUBSET = new Set([
@@ -14,6 +14,7 @@ const EMU_SUBSET = new Set([
   "key-empty",
   "refs-populated",
   "delete-confirm",
+  "inpaint-editing",
 ]);
 const isEmu = () => test.info().project.name === "reduced-motion" || test.info().project.name === "forced-colors";
 const skipUnlessEmu = (name: string) => test.skip(isEmu() && !EMU_SUBSET.has(name), "emulation subset");
@@ -176,7 +177,7 @@ test("key-ok", async ({ app }) => {
   await fillKey(app, "sk-or-test-ok");
   await openKeyModal(app);
   await app.getByRole("button", { name: "Test", exact: true }).click();
-  await expect(app.getByRole("dialog", { name: "OpenRouter API key" }).getByRole("status")).toContainText("valid");
+  await expect(app.getByRole("dialog", { name: "OpenRouter API key" }).getByRole("status")).toContainText("accepted");
   await scanState(app, "key-ok");
 });
 
@@ -185,7 +186,7 @@ test("key-err", async ({ app }) => {
   await fillKey(app, "sk-or-test-401");
   await openKeyModal(app);
   await app.getByRole("button", { name: "Test", exact: true }).click();
-  await expect(app.getByRole("alert")).toContainText("Invalid API key");
+  await expect(app.getByRole("alert")).toContainText("Key rejected");
   await scanState(app, "key-err");
 });
 
@@ -351,6 +352,54 @@ test("drawer-open", async ({ app }) => {
   await app.getByRole("button", { name: /sections menu/i }).click();
   await expect(app.getByRole("navigation", { name: "Sections" })).toBeVisible();
   await scanState(app, "drawer-open");
+});
+
+test("inpaint-empty", async ({ app }) => {
+  skipUnlessEmu("inpaint-empty");
+  await gotoTab(app, "inpaint");
+  await expect(app.getByRole("heading", { name: /Inpaint/ })).toBeVisible();
+  await scanState(app, "inpaint-empty");
+  if (test.info().project.name === "desktop") {
+    await expect(app.locator("#inpaint-main")).toMatchAriaSnapshot();
+  }
+});
+
+test("inpaint-picker-open", async ({ app }) => {
+  skipUnlessEmu("inpaint-picker-open");
+  await seedLibrary(app, { records: [{ prompt: "Picker subject" }] });
+  await app.reload();
+  await gotoTab(app, "inpaint");
+  await app.getByRole("button", { name: /Choose image|Change image/ }).first().click();
+  await expect(app.getByRole("dialog", { name: "Choose image" })).toBeVisible();
+  await scanState(app, "inpaint-picker-open");
+});
+
+test("inpaint-editing", async ({ app }) => {
+  skipUnlessEmu("inpaint-editing");
+  await seedLibrary(app, { records: [{ prompt: "Editing subject" }] });
+  await app.reload();
+  await gotoTab(app, "inpaint");
+  await app.getByRole("button", { name: /Choose image|Change image/ }).first().click();
+  await app.getByRole("button", { name: /^Use image:/ }).first().click();
+  await expect(app.locator(".mask-overlay")).toBeVisible({ timeout: 8000 });
+  await paintStroke(app, { x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 });
+  await scanState(app, "inpaint-editing");
+});
+
+test("inpaint-result", async ({ app }) => {
+  skipUnlessEmu("inpaint-result");
+  await seedLibrary(app, { records: [{ prompt: "Result source" }] });
+  await app.reload();
+  await fillKey(app, "sk-or-test-ok");
+  await gotoTab(app, "inpaint");
+  await app.getByRole("button", { name: /Choose image|Change image/ }).first().click();
+  await app.getByRole("button", { name: /^Use image:/ }).first().click();
+  await expect(app.locator(".mask-overlay")).toBeVisible({ timeout: 8000 });
+  await paintStroke(app, { x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 });
+  await app.getByRole("textbox", { name: "Inpaint instruction" }).fill("state result check");
+  await app.getByRole("button", { name: /Generate ·/ }).click();
+  await expect(app.locator(".inpaint-result-img")).toBeVisible({ timeout: 20000 });
+  await scanState(app, "inpaint-result");
 });
 
 test("mobile-sheet-open", async ({ app }) => {

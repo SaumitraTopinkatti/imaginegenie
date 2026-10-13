@@ -39,13 +39,17 @@ body {
 ::selection { background: var(--teal-soft); }
 /* static chrome text is not selectable; dynamic values opt back in below */
 body { -webkit-user-select: none; user-select: none; }
+/* D10 keep-mounted tabs hide with `hidden`: author display rules elsewhere
+ * must never override it. */
+[hidden] { display: none !important; }
 input, textarea { -webkit-user-select: text; user-select: text; }
 .gen-est .val, .stepper .val,
 .metric .big, .metric .mid,
 .card .prompt-snippet, .card .time, .card .cost-tag,
 .gen-meta, .gen-status, .lb-prompt, .lb-stat b,
-.key-status, .error-box,
+.key-status, .key-hint, .error-box,
 .degraded-banner span, .unreadable-bar span, .backup-status,
+.inpaint-preview,
 .ref-card .name, .ref-card .desc, .ref-card .foot .time, .ref-card .size-tag {
   -webkit-user-select: text; user-select: text;
 }
@@ -154,6 +158,7 @@ textarea::placeholder, input::placeholder { color: var(--muted); }
   display: flex; align-items: center; gap: 10px; width: 100%;
   border: 0; border-radius: 10px; background: transparent;
   padding: 11px 12px; cursor: pointer; text-align: left;
+  text-decoration: none;
   font-size: 14px; font-weight: 600; color: var(--muted);
   opacity: 0; transform: translateX(-12px);
   transition: opacity 0.2s ease, transform 0.26s ease, background-color 0.15s ease, color 0.15s ease;
@@ -359,12 +364,18 @@ select {
   border: 1px solid var(--line); background: var(--surface); color: var(--text);
   border-radius: 10px; padding: 10px 14px; font-size: 13px; font-weight: 500; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap;
+  max-width: 100%; min-width: 0;
 }
+/* Button text never spills: labels live in a truncating span, never as a
+   bare centred text node (N12). */
+.btn > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .btn:hover:not(:disabled) { box-shadow: inset 0 0 0 999px rgba(18, 32, 30, 0.05); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-ghost { background: transparent; }
 .btn-small { padding: 7px 11px; font-size: 12px; border-radius: 10px; height: 40px; }
 .key-status { font-size: 12px; margin-top: 8px; min-height: 18px; color: var(--muted); }
+/* Suspicious-key-shape hint: static text in body colour (AA on surface). */
+.key-hint { font-size: 12px; margin-top: 8px; line-height: 1.5; color: var(--text); }
 .remember-row {
   display: flex; align-items: center; gap: 8px; margin: 12px 0 16px;
   font-size: 12.5px; color: var(--muted); cursor: pointer;
@@ -810,4 +821,147 @@ html {
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* ---------- Inpaint mask editor (D1/D2/D14) ---------- */
+.mask-editor { display: flex; flex-direction: column; gap: 12px; }
+.mask-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.mask-toolbar .seg { flex: 1 1 220px; }
+.mask-size { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 500; flex: 2 1 220px; }
+.mask-size input[type="range"] { flex: 1; min-width: 120px; accent-color: var(--teal-dark); height: 32px; }
+.mask-history { display: flex; gap: 8px; flex-wrap: wrap; }
+.mask-stage { display: flex; justify-content: center; }
+.mask-status { color: var(--muted); font-size: 13px; }
+/* Borders/padding live on the wrapper (N4a): canvases map 1:1 to their rect. */
+.mask-canvas-wrap { position: relative; display: inline-block; max-width: 100%; border: 1px solid var(--line-strong); border-radius: 12px; overflow: hidden; background: var(--bg); }
+.mask-canvas-wrap.is-hidden-canvas { display: none; }
+.mask-base { display: block; max-width: 100%; max-height: 70dvh; width: auto; height: auto; }
+.mask-overlay { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+@media (pointer: fine) {
+  .mask-overlay { cursor: none; }
+}
+.mask-cursor {
+  display: none; position: absolute; left: 0; top: 0;
+  box-sizing: border-box;
+  border: 2px solid var(--teal-dark); border-radius: 50%;
+  background: rgba(255, 0, 0, 0.12); pointer-events: none;
+}
+/* Live brush-size preview (N14): centred ring at the true on-screen stroke
+   diameter. Double stroke (white + dark halo) reads on light and dark
+   images; the pill names the diameter. Fades out via React unmount. */
+.mask-size-preview {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  box-sizing: border-box; border-radius: 50%;
+  border: 2px solid #fff; box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.65);
+  background: rgba(255, 0, 0, 0.12); pointer-events: none;
+  display: grid; place-items: center;
+  animation: mask-preview-in 0.15s ease;
+}
+@keyframes mask-preview-in { from { opacity: 0; } to { opacity: 1; } }
+.mask-size-preview-label {
+  font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+  color: #fff; background: rgba(20, 30, 28, 0.85);
+  border-radius: 999px; padding: 3px 10px; white-space: nowrap;
+}
+
+/* ---------- Inpaint source picker (N5/N11) ---------- */
+.picker-card {
+  width: min(960px, 94vw); height: min(84dvh, 820px);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.picker-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.picker-head h3 { margin: 0; font-size: 16px; }
+.picker-card .seg { margin-bottom: 12px; flex: none; }
+.picker-body {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 2px;
+  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to bottom, black calc(100% - 24px), transparent);
+}
+.picker-card .confirm-actions { flex: none; margin-top: 14px; }
+.picker-empty { color: var(--muted); font-size: 13.5px; margin: 18px 4px; }
+.picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.picker-thumb {
+  position: relative; border: 1px solid var(--line-strong); border-radius: 10px;
+  overflow: hidden; background: var(--bg); padding: 0; cursor: pointer;
+  display: flex; flex-direction: column; min-width: 0;
+}
+.picker-thumb img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block; }
+.picker-cap {
+  display: block; font-size: 12px; color: var(--muted); line-height: 1.4;
+  padding: 6px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.picker-thumb:hover { border-color: var(--teal-dark); }
+.picker-thumb:hover .picker-cap { color: var(--text); }
+.picker-thumb:active { transform: scale(0.97); }
+.picker-thumb:disabled { cursor: default; opacity: 0.7; }
+.picker-thumb:focus-visible { outline: 2px solid var(--teal-dark); outline-offset: 2px; }
+@media (max-width: 560px) {
+  .picker-card { width: 94vw; height: 90dvh; }
+  .picker-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
+}
+.picker-busy {
+  position: absolute; inset: auto 0 0 0; background: rgba(20, 30, 28, 0.72);
+  color: #fff; font-size: 12px; padding: 4px;
+}
+
+/* ---------- Inpaint section (N6) ---------- */
+.inpaint-layout { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 24px; }
+.inpaint-controls { flex: 1 1 340px; max-width: 420px; min-width: 0; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+.inpaint-controls .prompt { min-height: 96px; }
+.inpaint-editor { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.inpaint-foot { margin-top: 0; padding: 0; border-top: 0; }
+.inpaint-advanced { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+.inpaint-advanced summary { cursor: pointer; font-weight: 600; font-size: 13.5px; padding: 2px 0; border-radius: 6px; }
+.inpaint-advanced summary:hover { color: var(--teal-dark); }
+.inpaint-advanced summary:active { transform: translateY(1px); }
+.check-row { display: flex; gap: 10px; align-items: flex-start; margin-top: 12px; font-size: 13.5px; font-weight: 500; cursor: pointer; border-radius: 8px; }
+.check-row input { width: 18px; height: 18px; margin-top: 1px; flex: none; accent-color: var(--teal-dark); }
+.check-row small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 2px; }
+.inpaint-preview {
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.6; white-space: pre-wrap;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px;
+  max-height: 220px; overflow-y: auto;
+}
+/* Selected-source row (N12): thumb + 2-line clamped label + compact Change.
+   The row can never outgrow the controls column. */
+.inpaint-source-row {
+  display: flex; align-items: center; gap: 10px; min-width: 0; max-width: 100%;
+  border: 1px solid var(--line); border-radius: 10px; padding: 8px 8px 8px 10px;
+  background: var(--bg);
+}
+.inpaint-source-thumb { width: 44px; height: 44px; flex: none; border-radius: 8px; object-fit: cover; }
+.inpaint-source-label {
+  flex: 1 1 auto; min-width: 0; font-size: 12.5px; line-height: 1.45; color: var(--text);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.inpaint-source-row .btn { flex: none; }
+.inpaint-help { font-size: 12px; color: var(--muted); line-height: 1.5; }
+.inpaint-aspect-note { font-size: 12px; color: var(--muted); }
+.inpaint-empty { padding: 36px 22px; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; color: var(--muted); }
+.inpaint-empty p { margin: 0; font-size: 13.5px; max-width: 340px; }
+.inpaint-loader { display: flex; flex-direction: column; gap: 12px; }
+/* Loader keeps the canvas box (N20): pinned to the measured canvas width
+   (--loader-w, set at run start), falling back to the same 70dvh cap the
+   editor canvas uses, narrowed via --loader-ar so tall sources can't push
+   the page. Height stays auto from aspect-ratio, so the ratio never distorts. */
+.inpaint-loader .denoise-frame {
+  width: var(--loader-w, min(100%, calc(70dvh * var(--loader-ar, 1))));
+  margin-inline: auto;
+}
+.inpaint-result { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+/* Result keeps the canvas box (N20): same max constraints as .mask-base in
+   the same column, so After lands at exactly the painted size — no jump. */
+.inpaint-result-img {
+  width: auto; max-width: 100%; max-height: 70dvh; margin-inline: auto;
+  height: auto; border-radius: 10px; border: 1px solid var(--line); display: block;
+  background: var(--bg);
+}
+.lb-sent { border-top: 1px solid var(--line); padding-top: 10px; }
+.lb-sent summary { cursor: pointer; font-size: 13px; font-weight: 600; border-radius: 6px; }
+.lb-sent summary:hover { color: var(--teal-dark); }
+.lb-sent .lb-prompt { margin-top: 8px; }
+@media (max-width: 900px) {
+  .inpaint-editor { order: -1; }
+  .inpaint-controls { max-width: none; }
 }

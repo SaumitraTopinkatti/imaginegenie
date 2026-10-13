@@ -15,9 +15,11 @@ export default defineConfig(({ mode }) => {
       resolve: {
         alias: [
           // Exact specifiers as written in src (matched pre-resolution):
-          // App.tsx uses ./lib/secureStore, components use ../lib/secureStore.
+          // App.tsx uses ./lib/secureStore, components use ../lib/secureStore,
+          // lib/*.ts uses ./secureStore.
           { find: "./lib/secureStore", replacement: "/e2e/mocks/secureStore.mock.ts" },
           { find: "../lib/secureStore", replacement: "/e2e/mocks/secureStore.mock.ts" },
+          { find: "./secureStore", replacement: "/e2e/mocks/secureStore.mock.ts" },
         ],
       },
       build: { outDir: "dist-e2e" },

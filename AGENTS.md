@@ -16,7 +16,7 @@ Single-user AI image studio (Vite + React 18 + TS). Prompt → Seedream 5.0 Pro 
 - App is served from root (`/`). Verify previews/screenshots at root, never a subpath.
 - Never manually run preview on port **4173**; `npm run a11y` owns it. For manual screenshots use another port (e.g. 4180+) launched **detached** — a foreground `vite preview` holds the console forever.
 - Kill preview servers and delete temp scripts/screenshots when done. Under `a11y/`: `axe-results.json` + `states/*.json` are gitignored per-run output; `e2e/__aria__/` snapshots are committed. Also clear `e2e-results/`, `playwright-report/`, `dist-e2e/` (all gitignored).
-- Loader frames must match the aspect of the card thumb they replace (grid thumbs are square). Mismatched loader/card ratios break the reveal.
+- Loader frames must match the aspect of the card thumb they replace (grid thumbs are square). Mismatched loader/card ratios break the reveal. Inpaint loader + result keep the measured canvas box (`--loader-w` pinned at run start, `max-height: 70dvh` like `.mask-base`) so paint → load → After never jumps or grows the page.
 - Scroll fades use CSS `mask-image`, not overlay strips/`::before` gradients — axe flags those as incomplete color-contrast.
 - Security headers + enforcing CSP ship via `public/_headers` (Netlify, copied to `dist/`). New external host (API base, fonts, images) → update the matching CSP directive there and re-validate (see README `## Security`). `frame-ancestors 'none'` + `X-Frame-Options: DENY` must stay — app is never embedded.
 - `dist-e2e/` is a mock-instrumented build (mock store + loopback API). Never ship it — `e2e-sentinel.mjs` fails if the mock hook is missing from `dist-e2e/` or present in production `dist/`.
@@ -25,6 +25,12 @@ Single-user AI image studio (Vite + React 18 + TS). Prompt → Seedream 5.0 Pro 
 
 - `src/App.tsx` — nearly all UI: header, drawer nav, Studio composer/gallery/lightbox, all modals. `tab` state drives `body[data-tab]`.
 - `src/components/ReferencesTab.tsx` — reference library tab (own dropzone, filters, edit drafts, delete confirm).
+- `src/components/InpaintTab.tsx` + `MaskEditor.tsx` + `SourcePicker.tsx`, `src/lib/inpaint.ts` (prompt contract, aspect, cost, composite) + `src/lib/types.ts` (`Generation`, `InpaintMeta`) + `src/lib/library.ts` (`saveGeneration`, reference thumb/pick loaders) — Inpaint section. App.tsx holds tab wiring + entry points only.
+- Inpaint records are ordinary generations with optional `inpaint` meta (`instruction` shown/searched, `prompt` = exact wrapped prompt sent). Gallery search matches `inpaint?.instruction ?? prompt`.
+- InpaintTab mounts on first visit then stays mounted (`hidden` when inactive + `[hidden]{display:none!important}` guard); tab switches never wipe strokes or orphan a run. The inpaint form must never take the `.composer` class (scoped Ctrl+Enter lives on its own panel).
+- Routing: `/` Studio, `/references`, `/inpaint[?src=gen:<id>|ref:<id>]` via History API (`src/lib/route.ts`, no router dep). **All tab switches go through `goTo(tab)` — never `setTab` directly** — or the URL drifts. Drawer items are real `<a href>` (plain click intercepted; modified/middle clicks fall through). Deploy fallback: `public/_redirects` (`/* /index.html 200`); `scripts/csp-serve.mjs` mirrors it for extensionless paths.
+- Mask geometry always derives from the overlay canvas rect (paint mapping + brush ring share one frame). `containerRef` is keyboard-shortcut scope only.
+- `e2e` alias note: vite `mode=e2e` aliases every `secureStore` specifier to the mock — new specifier spellings (`./secureStore` from `lib/`) need their own alias entry.
 - `src/components/DenoiseFrame.tsx` — canvas pixel-drift loader; loops until `done`, then finishes to clear and calls `onClean`.
 - `src/components/icons.tsx` — all icons.
 - `src/lib/openrouter.ts` — `MODEL` / `MODEL_ENDPOINT_SLUG` constants + API calls. `src/lib/images.ts` — image helpers. `src/lib/secureStore.ts` — AES-GCM IndexedDB store (generations + references); key held in memory only.

@@ -49,7 +49,12 @@ const server = createServer((req, res) => {
     const url = new URL(req.url || "/", "http://127.0.0.1");
     let path = decodeURIComponent(url.pathname);
     if (path.endsWith("/")) path += "index.html";
-    const file = normalize(join(DIR, path.slice(1)));
+    let file = normalize(join(DIR, path.slice(1)));
+    // SPA fallback (mirrors public/_redirects): extensionless deep links
+    // (/references, /inpaint) serve index.html with the production headers.
+    if ((!file.startsWith(DIR) || !existsSync(file) || statSync(file).isDirectory()) && extname(path) === "") {
+      file = join(DIR, "index.html");
+    }
     if (!file.startsWith(DIR) || !existsSync(file) || statSync(file).isDirectory()) {
       res.writeHead(404, { "content-type": "text/plain" });
       res.end("not found");

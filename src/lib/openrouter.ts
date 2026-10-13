@@ -46,6 +46,32 @@ function base(): string {
   return (env.VITE_OPENROUTER_BASE || DEFAULT_BASE).replace(/\/$/, "");
 }
 
+/**
+ * Key hygiene (D24): pasted keys routinely carry a "Bearer " prefix, wrapping
+ * quotes, or stray whitespace/newlines. Normalise at input and at use — warn
+ * on a suspicious shape, never block (custom/test keys stay usable).
+ */
+export function normalizeApiKey(raw: string): string {
+  // Peel layers: the quote often wraps the "Bearer " prefix
+  // (`"Bearer sk-or-…"`), so strip quotes and prefix until stable.
+  let k = (raw ?? "").trim();
+  for (let i = 0; i < 3; i++) {
+    const quoted =
+      k.length >= 2 &&
+      ((k.startsWith('"') && k.endsWith('"')) || (k.startsWith("'") && k.endsWith("'")));
+    const bearer = /^bearer\s+/i.test(k);
+    if (!quoted && !bearer) break;
+    if (quoted) k = k.slice(1, -1).trim();
+    k = k.replace(/^bearer\s+/i, "").trim();
+  }
+  return k.replace(/\s+/g, "");
+}
+
+/** Empty (nothing typed yet) never warns; anything else should start sk-or-. */
+export function looksLikeOpenRouterKey(k: string): boolean {
+  return k === "" || k.startsWith("sk-or-");
+}
+
 function friendlyError(status: number, bodyText: string): string {
   let detail = "";
   try {
@@ -56,7 +82,8 @@ function friendlyError(status: number, bodyText: string): string {
   }
   const d = detail ? ` — ${detail}` : "";
   if (status === 400) return `Request rejected (400). Check prompt, aspect ratio or references${d}.`;
-  if (status === 401) return `Invalid API key (401). Paste a valid OpenRouter key${d}.`;
+  if (status === 401)
+    return `Key rejected (401). Re-paste it from openrouter.ai/keys and check it's enabled${d}.`;
   if (status === 402) return `Insufficient balance (402). Top up OpenRouter credits${d}.`;
   if (status === 404) return `Model endpoint not found (404)${d}.`;
   if (status === 413) return `Images too large (413). Remove a reference or use smaller files${d}.`;
@@ -70,6 +97,9 @@ export async function generateImage(
   params: GenerateParams,
   signal?: AbortSignal
 ): Promise<GenerateResult> {
+  // Defensive: never send `Bearer ` with nothing (or junk) after it.
+  const key = normalizeApiKey(apiKey);
+  if (!key) throw new Error("Add your OpenRouter API key first (key button in the header).");
   const url = `${base()}/images`;
   const body: Record<string, unknown> = {
     model: MODEL,
@@ -88,7 +118,7 @@ export async function generateImage(
   const res = await fetch(url, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
       "HTTP-Referer": window.location.origin,
       "X-Title": "ImagineGenie",
@@ -123,11 +153,22 @@ export async function generateImage(
   };
 }
 
-export async function testKey(apiKey: string, signal?: AbortSignal): Promise<string> {
-  const url = `${base()}/images/models/${MODEL_ENDPOINT_SLUG}/endpoints`;
-  const res = await fetch(url, {
+export interface KeyInfo {
+  /** Provider's label for the key (untrusted text — render as text). */
+  label: string;
+  limitRemaining: number | null;
+}
+
+/**
+ * Truthful Test (D23): `GET /key` is authenticated, so only a key OpenRouter
+ * accepts succeeds. Free, no generation. The model-endpoint probe stays out.
+ */
+export async function testKey(apiKey: string, signal?: AbortSignal): Promise<KeyInfo> {
+  const key = normalizeApiKey(apiKey);
+  if (!key) throw new Error("Add your OpenRouter API key first (key button in the header).");
+  const res = await fetch(`${base()}/key`, {
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${key}`,
       "HTTP-Referer": window.location.origin,
       "X-Title": "ImagineGenie",
     },
@@ -136,16 +177,13 @@ export async function testKey(apiKey: string, signal?: AbortSignal): Promise<str
   const text = await res.text();
   if (!res.ok) throw new Error(friendlyError(res.status, text));
   try {
-    const j = JSON.parse(text);
-    const eps = j?.data?.endpoints ?? j?.endpoints;
-    if (Array.isArray(eps) && eps.length > 0) {
-      const pricing = eps[0]?.pricing;
-      const price = pricing ? JSON.stringify(pricing) : "ok";
-      return `Connected — ${eps.length} endpoint(s). Pricing: ${price}`.slice(0, 220);
-    }
-    return "Connected — model endpoint reachable.";
+    const d = JSON.parse(text)?.data ?? {};
+    return {
+      label: typeof d?.label === "string" ? d.label.slice(0, 80) : "",
+      limitRemaining: typeof d?.limit_remaining === "number" ? d.limit_remaining : null,
+    };
   } catch {
-    return "Connected — model endpoint reachable.";
+    return { label: "", limitRemaining: null };
   }
 }
 

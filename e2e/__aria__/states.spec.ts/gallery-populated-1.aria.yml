@@ -23,28 +23,28 @@
   - button "Library"
   - article:
     - 'button "Open image 1: Square teal study"': /\$\d+\.\d+/
-    - text: /Square teal study 1:1 [\d,.]+[bkmBKM]+ png Oct \d+, \d+:\d+ AM/
+    - text: /Square teal study 1:1 [\d,.]+[bkmBKM]+ png Oct \d+, \d+:\d+ (AM|PM)/
     - button "Retry image 1 with same settings"
     - button "Copy image 1"
     - button "Download image 1 PNG"
     - button "Delete image 1"
   - article:
     - 'button "Open image 2: Wide coastline panorama"': /\$\d+\.\d+/
-    - text: /Wide coastline panorama \d+:9 [\d,.]+[bkmBKM]+ png Oct \d+, \d+:\d+ AM/
+    - text: /Wide coastline panorama \d+:9 [\d,.]+[bkmBKM]+ png Oct \d+, \d+:\d+ (AM|PM)/
     - button "Retry image 2 with same settings"
     - button "Copy image 2"
     - button "Download image 2 PNG"
     - button "Delete image 2"
   - article:
     - 'button "Open image 3: Tall lighthouse"': /\$\d+\.\d+/
-    - text: /Tall lighthouse 9:\d+ [\d,.]+[bkmBKM]+ webp Oct \d+, \d+:\d+ AM/
+    - text: /Tall lighthouse 9:\d+ [\d,.]+[bkmBKM]+ webp Oct \d+, \d+:\d+ (AM|PM)/
     - button "Retry image 3 with same settings"
     - button "Copy image 3"
     - button "Download image 3 PNG"
     - button "Delete image 3"
   - article:
     - 'button "Open image 4: Still life with two refs"': /\$\d+\.\d+/
-    - text: /Still life with two refs 3:2 [\d,.]+[bkmBKM]+ png \+2 ref Oct \d+, \d+:\d+ AM/
+    - text: /Still life with two refs 3:2 [\d,.]+[bkmBKM]+ png \+2 ref Oct \d+, \d+:\d+ (AM|PM)/
     - button "Retry image 4 with same settings"
     - button "Copy image 4"
     - button "Download image 4 PNG"

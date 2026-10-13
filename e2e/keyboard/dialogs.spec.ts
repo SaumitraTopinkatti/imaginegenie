@@ -1,6 +1,6 @@
-// Keyboard/focus contract: all 8 Dialogs + app-specific key behavior.
+// Keyboard/focus contract: all 10 Dialogs + app-specific key behavior.
 import type { Page } from "@playwright/test";
-import { test, expect, assertDialogContract, assertLayeredEsc, seedLibrary, gotoTab, fillKey, ensureComposerOpen, loggedWithPrompt, marker } from "../fixtures";
+import { test, expect, assertDialogContract, assertLayeredEsc, seedLibrary, gotoTab, fillKey, ensureComposerOpen, loggedWithPrompt, paintStroke, marker } from "../fixtures";
 import { pngDataUrl } from "../mock-api/png.mjs";
 
 async function openMenu(app: Page) {
@@ -140,6 +140,62 @@ test("contract: refs clear", async ({ app }) => {
   });
 });
 
+test("contract: inpaint source picker", async ({ app }) => {
+  await seedLibrary(app, { records: [{ prompt: "Pickable" }] });
+  await app.reload();
+  await gotoTab(app, "inpaint");
+  await assertDialogContract(app, {
+    open: async () => {
+      await app.getByRole("button", { name: /Choose image|Change image/ }).first().click();
+    },
+    dialogName: "Choose image",
+    returnTo: /Choose image|Change image/,
+  });
+});
+
+test("contract: discard-mask alertdialog", async ({ app }) => {
+  await seedLibrary(app, {
+    records: [
+      { prompt: "First source", imageUrl: pngDataUrl(128, 128, "solid") },
+      { prompt: "Second source", imageUrl: pngDataUrl(128, 128, "gradient") },
+    ],
+  });
+  await app.reload();
+  await gotoTab(app, "inpaint");
+  await app.getByRole("button", { name: /Choose image|Change image/ }).first().click();
+  await app.getByRole("button", { name: /^Use image:/ }).first().click();
+  await expect(app.locator(".mask-overlay")).toBeVisible({ timeout: 8000 });
+  await paintStroke(app, { x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 });
+  await assertDialogContract(app, {
+    open: async () => {
+      await app.getByRole("button", { name: /Choose image|Change image/ }).first().click();
+      await app.getByRole("button", { name: /^Use image:/ }).nth(1).click();
+    },
+    dialogName: "Discard mask?",
+    role: "alertdialog",
+    // Picking closes the picker first, so Esc lands on the section's
+    // Change-image button (the picker's own focus-return target).
+    returnTo: /Choose image|Change image/,
+  });
+  // Esc kept the strokes: the mask is still armed.
+  await app.keyboard.press("Escape");
+  await expect(app.getByRole("dialog", { name: "Choose image" })).toBeHidden();
+});
+
+test("editor shortcuts stay out of the instruction field", async ({ app }) => {
+  await seedLibrary(app, { records: [{ prompt: "Shortcut source" }] });
+  await app.reload();
+  await gotoTab(app, "inpaint");
+  await app.getByRole("button", { name: /Choose image|Change image/ }).first().click();
+  await app.getByRole("button", { name: /^Use image:/ }).first().click();
+  await expect(app.locator(".mask-overlay")).toBeVisible({ timeout: 8000 });
+  // Typing [ ] in the instruction must not touch the brush or undo stack.
+  await app.getByRole("textbox", { name: "Inpaint instruction" }).click();
+  await app.keyboard.type("a [b]");
+  await expect(app.getByRole("textbox", { name: "Inpaint instruction" })).toHaveValue("a [b]");
+  await expect(app.getByRole("button", { name: "Undo" })).toBeDisabled();
+});
+
 test("card thumb opens via keyboard; actions do not", async ({ app }) => {
   await seedLibrary(app, { records: [{ prompt: "Keyboard card" }] });
   await app.reload();
@@ -170,7 +226,7 @@ test("tab switch sets focus and title", async ({ app }) => {
   await expect(app).toHaveTitle(/References/);
   await expect(app.locator("#ref-library")).toBeFocused();
   await app.getByRole("button", { name: /sections menu/i }).click();
-  await app.getByRole("button", { name: /^Studio/ }).click();
+  await app.getByRole("link", { name: /^Studio/ }).click();
   await expect(app).toHaveTitle(/Studio/);
   await expect(app.locator("#gallery")).toBeFocused();
 });
