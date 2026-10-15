@@ -29,6 +29,8 @@ export interface Generation {
   refUrls: string[];
   /** Present on inpaint results; ordinary records omit it. */
   inpaint?: InpaintMeta;
+  /** Provider request id; absent = Seedream (optional so old rows read unchanged). */
+  model?: string;
 }
 
 /** Image chosen as an inpaint source (picker, lightbox or viewer entry). */

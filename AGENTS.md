@@ -1,6 +1,6 @@
 # AGENTS.md — imaginegenie
 
-Single-user AI image studio (Vite + React 18 + TS). Prompt → Seedream 5.0 Pro via OpenRouter → encrypted local library.
+Single-user AI image studio (Vite + React 18 + TS). Prompt → OpenRouter (`POST /images`) → encrypted local library. Studio offers Seedream 5.0 Pro (default) + Qwen Image 3 Pro; Inpaint stays Seedream-only.
 
 ## Commands
 
@@ -26,7 +26,7 @@ Single-user AI image studio (Vite + React 18 + TS). Prompt → Seedream 5.0 Pro 
 - `src/App.tsx` — nearly all UI: header, drawer nav, Studio composer/gallery/lightbox, all modals. `tab` state drives `body[data-tab]`.
 - `src/components/ReferencesTab.tsx` — reference library tab (own dropzone, filters, edit drafts, delete confirm).
 - `src/components/InpaintTab.tsx` + `MaskEditor.tsx` + `SourcePicker.tsx`, `src/lib/inpaint.ts` (prompt contract, aspect, cost, composite) + `src/lib/types.ts` (`Generation`, `InpaintMeta`) + `src/lib/library.ts` (`saveGeneration`, reference thumb/pick loaders) — Inpaint section. App.tsx holds tab wiring + entry points only.
-- Inpaint records are ordinary generations with optional `inpaint` meta (`instruction` shown/searched, `prompt` = exact wrapped prompt sent). Gallery search matches `inpaint?.instruction ?? prompt`.
+- Inpaint records are ordinary generations with optional `inpaint` meta (`instruction` shown/searched, `prompt` = exact wrapped prompt sent). Gallery search matches `inpaint?.instruction ?? prompt` plus the model's short label.
 - InpaintTab mounts on first visit then stays mounted (`hidden` when inactive + `[hidden]{display:none!important}` guard); tab switches never wipe strokes or orphan a run. The inpaint form must never take the `.composer` class (scoped Ctrl+Enter lives on its own panel).
 - Routing: `/` Studio, `/references`, `/inpaint[?src=gen:<id>|ref:<id>]` via History API (`src/lib/route.ts`, no router dep). **All tab switches go through `goTo(tab)` — never `setTab` directly** — or the URL drifts. Drawer items are real `<a href>` (plain click intercepted; modified/middle clicks fall through). Deploy fallback: `public/_redirects` (`/* /index.html 200`); `scripts/csp-serve.mjs` mirrors it for extensionless paths.
 - Mask geometry always derives from the overlay canvas rect (paint mapping + brush ring share one frame). `containerRef` is keyboard-shortcut scope only.
@@ -34,7 +34,7 @@ Single-user AI image studio (Vite + React 18 + TS). Prompt → Seedream 5.0 Pro 
 - `src/components/DenoiseFrame.tsx` — canvas pixel-drift loader; loops until `done`, then finishes to clear and calls `onClean`.
 - `src/lib/useBottomSheet.ts` — shared mobile-sheet behaviour (`SHEET_MQ`, scroll lock, focus trap, Esc, grab swipe, guarded peek focus-return). Studio's drawer and Inpaint's controls both run on it; sheet CSS is shared via `.composer, .inpaint-sheet` selector lists (never put `.composer` on Inpaint).
 - `src/components/icons.tsx` — all icons.
-- `src/lib/openrouter.ts` — `MODEL` / `MODEL_ENDPOINT_SLUG` constants + API calls. `src/lib/images.ts` — image helpers. `src/lib/secureStore.ts` — AES-GCM IndexedDB store (generations + references); key held in memory only.
+- `src/lib/openrouter.ts` — `MODEL` / `MODEL_ENDPOINT_SLUG` constants + API calls. `src/lib/models.ts` — per-model caps table (`MODELS`, `DEFAULT_MODEL = "seedream"`, `modelFor()`): aspects, ref caps, prices, request ids. All model knowledge lives here; no scattered `if (qwen)`. Records carry `model?` (absent = Seedream). `src/lib/images.ts` — image helpers. `src/lib/secureStore.ts` — AES-GCM IndexedDB store (generations + references); key held in memory only.
 - Generation reveal rule: a pending slot reuses the **same card node** (`Slot {key, gen, revealing, epoch}`, merge after 1100ms, epoch-guarded). Never unmount/remount the card between loader and image or the reveal sequence breaks.
 - Image count (1–4) is a **parallel fan-out of `n: 1` calls** (`src/lib/openrouter.ts` hardcodes `n: 1`). Never request `n > 1`.
 - Clipboard paste is **tab-scoped**: Studio handler returns early unless `tab === "studio"`; ReferencesTab owns library paste. New paste targets must follow the same guard, and must never `preventDefault` text-only pastes.
@@ -44,7 +44,7 @@ Single-user AI image studio (Vite + React 18 + TS). Prompt → Seedream 5.0 Pro 
 ## Money + secrets (hard rules)
 
 - Real OpenRouter image calls cost money. **Ask before any real generation** during dev/verification; verify with mocks/screenshots.
-- **Seedream 5.0 Pro only.** No model switches/additions without an explicit request.
+- **Seedream 5.0 Pro + Qwen Image 3 Pro only.** No further model switches/additions without an explicit request.
 - API key lives in tab memory + `.env` (`VITE_OPENROUTER_API_KEY`, see `.env.example`). Opt-in "remember" keeps an AES-GCM copy in IndexedDB (`openrouter-key` in `secureStore.ts`), decrypted only for viewing / Test / Generate via `resolveKey`, working copy dropped on modal close. Pasted keys auto-clean (`normalizeApiKey`: trim, strip `Bearer `/quotes/whitespace) at input/load/resolve/persist — stored value is always clean; odd shape warns, never blocks. Test is truthful: `GET /key` (label + `limit_remaining`), never the models endpoint. Never `sessionStorage`/plaintext at rest, never commit/log/print keys; clear test keys after use. `output-*.png`, `.env*`, `a11y/axe-results.json` are gitignored.
 
 ## Design conventions (don't regress)

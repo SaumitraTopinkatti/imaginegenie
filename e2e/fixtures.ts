@@ -107,6 +107,7 @@ export interface SeedOpts {
     refCount?: number;
     imageUrl?: string;
     refImageUrls?: string[];
+    model?: string;
   }>;
   references?: Array<{ name?: string; description?: string; group?: string; imageUrl?: string }>;
 }

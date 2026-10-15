@@ -1,4 +1,6 @@
-export const MODEL = "bytedance-seed/seedream-5-0-pro";
+import { DEFAULT_MODEL, MODELS, modelFor } from "./models";
+
+export const MODEL = MODELS.seedream.requestId;
 export const MODEL_ENDPOINT_SLUG = "bytedance-seed/seedream-5-0-pro-20260812";
 export const DEFAULT_BASE = "https://openrouter.ai/api/v1";
 
@@ -32,6 +34,8 @@ export interface GenerateParams {
   resolution: Resolution;
   refs: string[]; // data URLs or https URLs
   seed?: number;
+  /** Provider request id; defaults to Seedream so old call sites are untouched. */
+  model?: string;
 }
 
 export interface GenerateResult {
@@ -101,8 +105,13 @@ export async function generateImage(
   const key = normalizeApiKey(apiKey);
   if (!key) throw new Error("Add your OpenRouter API key first (key button in the header).");
   const url = `${base()}/images`;
+  // Model resolves per call (never a global) so parallel fan-out can't mix models.
+  const caps = modelFor(params.model);
+  if (!caps.seed && params.seed !== undefined && !Number.isNaN(params.seed)) {
+    throw new Error(`${caps.label} does not support seeds. Clear the seed first. No request was sent.`);
+  }
   const body: Record<string, unknown> = {
-    model: MODEL,
+    model: params.model ?? MODELS[DEFAULT_MODEL].requestId,
     prompt: params.prompt,
     n: 1,
     aspect_ratio: params.aspect_ratio,

@@ -557,6 +557,8 @@ export interface E2eSeedRecord {
   thumbUrl?: string;
   /** Reference data URLs stored with the generation (lightbox refs row). */
   refImageUrls?: string[];
+  /** Provider request id; absent = Seedream (legacy rows). */
+  model?: string;
   /** Inpaint metadata carried on the record (N2: seeded inpaint rendering). */
   inpaint?: StoredRecord["inpaint"];
 }
@@ -603,6 +605,7 @@ async function e2eSeed(seed: {
         ? await Promise.all(r.refImageUrls.map((u) => encryptText(u)))
         : undefined,
       inpaint: r.inpaint,
+      model: r.model,
     });
     recordIds.push(id);
   }

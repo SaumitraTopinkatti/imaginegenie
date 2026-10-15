@@ -32,6 +32,8 @@ export interface StoredRecord {
   refsEnc?: EncryptedPayload[];
   /** Inpaint metadata (optional so old rows read unchanged; backup spreads ...r). */
   inpaint?: InpaintMeta;
+  /** Provider request id (optional so old rows read unchanged; absent = Seedream). */
+  model?: string;
 }
 
 /**

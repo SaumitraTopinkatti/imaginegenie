@@ -7,7 +7,7 @@
  * only a selection marker — the prompt must say so explicitly, in the same
  * colour/alpha the editor exports (shared constants below).
  */
-import { ASPECT_RATIOS } from "./openrouter";
+import { MODELS } from "./models";
 
 /** Pure red selection marker, painted opaque offscreen (D2). */
 export const MASK_COLOR = "#FF0000";
@@ -18,9 +18,9 @@ export const INPAINT_MAX_DIM = 2048;
 /** Instruction cap enforced by UI counter + normalizer. */
 export const MAX_INSTRUCTION = 1000;
 /** Cost constants mirror the provider pricing used in App (1K/2K + per-ref). */
-export const INPAINT_PRICE_1K = 0.045;
-export const INPAINT_PRICE_2K = 0.09;
-export const INPAINT_PRICE_PER_REF = 0.003;
+export const INPAINT_PRICE_1K = MODELS.seedream.price["1K"];
+export const INPAINT_PRICE_2K = MODELS.seedream.price["2K"];
+export const INPAINT_PRICE_PER_REF = MODELS.seedream.price.perRef;
 
 /** Trim + collapse whitespace + cap. Never mangle: no [[...]] stripping
  *  (e2e mock directives ride inside the instruction verbatim). */
@@ -94,12 +94,12 @@ function ratioValue(label: string): number | null {
  * Compared in log space so 1:2 and 2:1 are symmetric. Also returns the
  * relative error for the >3% aspect-mismatch notice.
  */
-export function nearestAspect(w: number, h: number): { ratio: string; error: number } {
+export function nearestAspect(w: number, h: number, aspects: readonly string[] = MODELS.seedream.aspects): { ratio: string; error: number } {
   const target = w / h;
   const logTarget = Math.log(target);
   let best = "1:1";
   let bestDist = Infinity;
-  for (const label of ASPECT_RATIOS) {
+  for (const label of aspects) {
     if (label === "auto") continue;
     const v = ratioValue(label);
     if (v === null) continue;

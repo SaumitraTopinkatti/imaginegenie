@@ -36,8 +36,7 @@ const KEY_SCENARIOS = {
 };
 
 const ERROR_MESSAGES = {
-  400: "prompt blocked by safety filters",
-  401: "invalid api key",
+  400: "prompt blocked by safety filters",  401: "invalid api key",
   402: "insufficient credits",
   404: "no such endpoint",
   413: "payload too large",
@@ -45,6 +44,14 @@ const ERROR_MESSAGES = {
   500: "provider exploded",
   502: "bad gateway upstream",
 };
+
+// Mirrors src/lib/models.ts Qwen caps so client bugs surface as real 400s.
+const QWEN_ID = "qwen/qwen-image-3-pro-20260805";
+const QWEN_ASPECTS = [
+  "1:1", "1:2", "2:1", "2:3", "3:2", "3:4", "4:3", "4:5",
+  "5:4", "9:16", "16:9",
+];
+const QWEN_MAX_REFS = 4;
 
 function parseDirective(prompt) {
   const m = /\[\[mock:([^\]]+)\]\]/.exec(prompt || "");
@@ -220,6 +227,20 @@ const server = createServer(async (req, res) => {
       unauth(res, entry);
       pushLog();
       return;
+    }
+    // Per-model provider caps (Qwen): reject over-cap refs / bad aspects like the real API.
+    if (body?.model === QWEN_ID) {
+      const refCount = Array.isArray(body?.input_references) ? body.input_references.length : 0;
+      if (refCount > QWEN_MAX_REFS) {
+        send(res, 400, { error: { message: "input_references: must have between 0 and 4 items", code: 400 } });
+        pushLog();
+        return;
+      }
+      if (!QWEN_ASPECTS.includes(body?.aspect_ratio)) {
+        send(res, 400, { error: { message: `aspect_ratio: not supported (${body?.aspect_ratio})`, code: 400 } });
+        pushLog();
+        return;
+      }
     }
     const { scenario, params, via } = scenarioFor(body, auth);
     const counterKey = `${scenario}|${JSON.stringify(params)}|${body?.prompt ?? ""}`;

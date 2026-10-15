@@ -10,6 +10,14 @@ import {
   type Resolution,
 } from "./lib/openrouter";
 import {
+  DEFAULT_MODEL,
+  MODELS,
+  modelFor,
+  nearestSupportedAspect,
+  type ModelCaps,
+  type ModelId,
+} from "./lib/models";
+import {
   b64ToDataUrl,
   copyImageDataUrl,
   dataUrlToB64,
@@ -218,6 +226,9 @@ function GenCard({ g, index, reveal = false, onOpen, onRetry, onCopy, onDownload
         <div className={reveal ? "prompt-snippet r-prompt" : "prompt-snippet"}>{snippet}</div>
         <div className={reveal ? "meta r-meta" : "meta"}>
           {g.inpaint && <span className="tag hl">Inpaint</span>}
+          {modelFor(g.model).id !== DEFAULT_MODEL && (
+            <span className="tag">{modelFor(g.model).short}</span>
+          )}
           <span className="tag">{g.aspectRatio}</span>
           <span className="tag">{g.resolution}</span>
           <span className="tag">{g.mediaType.replace("image/", "")}</span>
@@ -297,6 +308,8 @@ export default function App() {
 
   /* ----- composer ----- */
   const [prompt, setPrompt] = useState("");
+  const [modelId, setModelId] = useState<ModelId>(DEFAULT_MODEL);
+  const caps = MODELS[modelId];
   const [aspect, setAspect] = useState<string>("auto");
   const [resolution, setResolution] = useState<Resolution>("1K");
   const [seedStr, setSeedStr] = useState("");
@@ -615,6 +628,7 @@ export default function App() {
               thumbUrl,
               refUrls,
               inpaint: r.inpaint,
+              model: r.model,
             });
           } catch {
             // Undecryptable (key missing or corrupt): counted, never silent.
@@ -716,8 +730,9 @@ export default function App() {
     async (files: FileList | File[]) => {
       const list = Array.from(files);
       if (list.length === 0) return;
-      if (refs.length + list.length > MAX_REFS) {
-        pushToast("err", `Limit is ${MAX_REFS} references. Remove some first.`);
+      const maxRefs = MODELS[modelId].maxRefs;
+      if (refs.length + list.length > maxRefs) {
+        pushToast("err", `Limit is ${maxRefs} references. Remove some first.`);
         return;
       }
       const bad = list.filter((f) => !isAccepted(f));
@@ -727,12 +742,12 @@ export default function App() {
       }
       try {
         const urls = await Promise.all(list.map((f) => fileToDataUrl(f)));
-        setRefs((r) => [...r, ...toRefItems(urls)].slice(0, MAX_REFS));
+        setRefs((r) => [...r, ...toRefItems(urls)].slice(0, maxRefs));
       } catch (e) {
         pushToast("err", e instanceof Error ? e.message : "Could not read images.");
       }
     },
-    [refs.length, pushToast]
+    [refs.length, pushToast, modelId]
   );
 
   /* ----- paste images from clipboard straight into the composer tray (Studio tab only) ----- */
@@ -761,6 +776,21 @@ export default function App() {
     });
 
   const randomSeed = () => setSeedStr(String(Math.floor(Math.random() * 2147483647)));
+
+  /** Model switch: snap unsupported shapes to the nearest supported one; never touch the tray. */
+  const switchModel = (next: ModelId) => {
+    if (next === modelId) return;
+    const nextCaps = MODELS[next];
+    setModelId(next);
+    if (!nextCaps.aspects.includes(aspect)) {
+      const snapped =
+        aspect === "auto"
+          ? "1:1"
+          : nearestSupportedAspect(ratioOf(aspect), 1, nextCaps.aspects);
+      setAspect(snapped);
+      pushToast("info", `Shape ${aspect} isn't supported by ${nextCaps.label} — using ${snapped}.`);
+    }
+  };
 
   /* ----- key test ----- */
   const doTest = async () => {
@@ -813,6 +843,17 @@ export default function App() {
         }
         seed = n;
       }
+      const genCaps = MODELS[modelId];
+      if (refs.length > genCaps.maxRefs) {
+        setError(
+          `${genCaps.label} accepts up to ${genCaps.maxRefs} references — remove ${refs.length - genCaps.maxRefs}. No request was sent.`
+        );
+        return;
+      }
+      if (!genCaps.aspects.includes(aspect)) {
+        setError(`${genCaps.label} does not support shape ${aspect}. Pick another shape. No request was sent.`);
+        return;
+      }
       setError("");
       const count = clampCount(Number.parseInt(countStr, 10) || 1);
       setGenerating(true);
@@ -847,7 +888,7 @@ export default function App() {
           return Math.min(92, Math.max(p + Math.max(1, (92 - p) / 14), floor));
         });
       }, 350);
-      const params = { prompt: prompt.trim(), aspect_ratio: aspect, resolution, refs: refs.map((r) => r.url), seed };
+      const params = { prompt: prompt.trim(), aspect_ratio: aspect, resolution, refs: refs.map((r) => r.url), seed, model: genCaps.requestId };
       try {
         // Fan out N parallel n=1 requests sharing one AbortController, so one
         // failure (or cancel) never kills the other slots. Single attempt each.
@@ -917,6 +958,7 @@ export default function App() {
               imageUrl: fullUrl,
               thumbUrl: thumb,
               refUrls: refs.map((r) => r.url),
+              model: genCaps.requestId,
             };
             await saveRecord({
               id: gen.id,
@@ -931,6 +973,7 @@ export default function App() {
               imageEnc,
               thumbEnc,
               refsEnc,
+              model: gen.model,
             });
             // Hold the result on its slot: it merges into the library only after
             // the placeholder's exit + reveal sequence finishes in the same card.
@@ -990,7 +1033,7 @@ export default function App() {
     } finally {
       genLock.current = false;
     }
-  }, [generating, clearing, resolveKey, prompt, aspect, resolution, refs, seedStr, countStr, pushToast]);
+  }, [generating, clearing, resolveKey, prompt, aspect, resolution, refs, seedStr, countStr, pushToast, modelId]);
 
   const generateRef = useRef(doGenerate);
   generateRef.current = doGenerate;
@@ -1156,10 +1199,12 @@ export default function App() {
 
   const retryGen = (g: Generation) => {
     setPrompt(g.prompt);
+    const restoredCaps = modelFor(g.model);
+    setModelId(restoredCaps.id);
     setAspect(g.aspectRatio);
     setResolution((g.resolution === "2K" ? "2K" : "1K") as Resolution);
     setSeedStr(g.seed !== undefined ? String(g.seed) : "");
-    const restored = (g.refUrls ?? []).slice(0, MAX_REFS);
+    const restored = (g.refUrls ?? []).slice(0, restoredCaps.maxRefs);
     setRefs(toRefItems(restored));
     setLightbox(null);
     setViewRef(null);
@@ -1270,15 +1315,16 @@ export default function App() {
 
   const reuseRefs = (urls: string[]) => {
     if (urls.length === 0) return;
-    const room = MAX_REFS - refs.length;
+    const maxRefs = MODELS[modelId].maxRefs;
+    const room = maxRefs - refs.length;
     if (room <= 0) {
-      pushToast("err", `Reference tray is full (${MAX_REFS}). Remove some first.`);
+      pushToast("err", `Reference tray is full (${maxRefs}). Remove some first.`);
       return;
     }
     const add = urls.slice(0, room);
-    setRefs((cur) => [...cur, ...toRefItems(add)].slice(0, MAX_REFS));
+    setRefs((cur) => [...cur, ...toRefItems(add)].slice(0, maxRefs));
     if (add.length < urls.length) {
-      pushToast("info", `Added ${add.length} of ${urls.length} — tray holds ${MAX_REFS}.`);
+      pushToast("info", `Added ${add.length} of ${urls.length} — tray holds ${maxRefs}.`);
     } else if (add.length === 1) {
       pushToast("ok", "Reference loaded into composer.");
     } else {
@@ -1374,7 +1420,12 @@ export default function App() {
       if (aspectFilter !== "all" && g.aspectRatio !== aspectFilter) return false;
       // Inpaint records store the wrapped provider prompt: search the
       // user's instruction instead of the wrapper boilerplate.
-      if (q && !(g.inpaint?.instruction ?? g.prompt).toLowerCase().includes(q)) return false;
+      if (
+        q &&
+        !(g.inpaint?.instruction ?? g.prompt).toLowerCase().includes(q) &&
+        !modelFor(g.model).short.toLowerCase().includes(q)
+      )
+        return false;
       return true;
     });
   }, [generations, search, aspectFilter]);
@@ -1390,16 +1441,17 @@ export default function App() {
     [filtered, pendingGenIds]
   );
 
-  const estPrice = resolution === "2K" ? PRICE_2K : PRICE_1K;
+  const estPrice = resolution === "2K" ? caps.price["2K"] : caps.price["1K"];
   const countNum = clampCount(Number.parseInt(countStr, 10) || 1);
   /** Live seed validity (mirrors the generate-time check for AT). */
   const seedInvalid =
     seedStr.trim() !== "" &&
     (!Number.isInteger(Number(seedStr.trim())) || Number(seedStr.trim()) < 0);
-  const estTotal = (estPrice + refs.length * 0.003) * countNum;
+  const estTotal = (estPrice + refs.length * caps.price.perRef) * countNum;
+  const overRefCap = refs.length > caps.maxRefs;
   const moreAspects = useMemo(
-    () => ASPECT_RATIOS.filter((a) => !MAIN_ASPECTS.includes(a)),
-    []
+    () => ASPECT_RATIOS.filter((a) => caps.aspects.includes(a) && !caps.mainAspects.includes(a)),
+    [caps]
   );
   const loaderDims = gridDims(aspect);
   const loaderAspect = aspectCss(aspect);
@@ -1619,11 +1671,15 @@ export default function App() {
               </div>
               <select
                 className="model-select"
-                value={MODEL}
-                onChange={() => {}}
+                value={modelId}
+                onChange={(e) => switchModel(e.target.value as ModelId)}
                 aria-label="Model"
               >
-                <option value={MODEL}>Seedream 5.0 Pro</option>
+                {(Object.values(MODELS) as ModelCaps[]).map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -1652,7 +1708,7 @@ export default function App() {
                 <span className="count">{aspect}</span>
               </div>
               <div className="shape-grid" role="group" aria-labelledby="shape-label">
-                {MAIN_ASPECTS.map((a) => {
+                {caps.mainAspects.map((a) => {
                   const sel = aspect === a;
                   const box = shapeBox(a);
                   return (
@@ -1714,7 +1770,7 @@ export default function App() {
                   aria-pressed={resolution === "1K"}
                   onClick={() => setResolution("1K")}
                 >
-                  1K <small>$0.045 / image</small>
+                  1K <small>${caps.price["1K"].toFixed(3)} / image</small>
                 </button>
                 <button
                   type="button"
@@ -1722,7 +1778,7 @@ export default function App() {
                   aria-pressed={resolution === "2K"}
                   onClick={() => setResolution("2K")}
                 >
-                  2K <small>$0.09 / image</small>
+                  2K <small>${caps.price["2K"].toFixed(3)} / image</small>
                 </button>
               </div>
               <div className="price-hint">
@@ -1793,7 +1849,9 @@ export default function App() {
               <div className="field-label">
                 <span>References</span>
                 <span className="count">
-                  {refs.length} / {MAX_REFS} · $0.003 each
+                  {overRefCap
+                    ? `${refs.length} / ${caps.maxRefs} · remove ${refs.length - caps.maxRefs}`
+                    : `${refs.length} / ${caps.maxRefs} · $${caps.price.perRef.toFixed(3)} each`}
                 </span>
               </div>
               <button
@@ -1831,7 +1889,7 @@ export default function App() {
                 }}
               />
               <div className="ref-slots" aria-hidden="true">
-                {Array.from({ length: MAX_REFS }).map((_, i) => (
+                {Array.from({ length: Math.max(caps.maxRefs, refs.length) }).map((_, i) => (
                   <span key={i} className={i < refs.length ? "full" : undefined} />
                 ))}
               </div>
@@ -2296,6 +2354,10 @@ export default function App() {
                 <div className="lb-stat">
                   <small>Type</small>
                   <b>{lightbox.mediaType}</b>
+                </div>
+                <div className="lb-stat">
+                  <small>Model</small>
+                  <b>{modelFor(lightbox.model).label}</b>
                 </div>
                 <div className="lb-stat">
                   <small>References</small>

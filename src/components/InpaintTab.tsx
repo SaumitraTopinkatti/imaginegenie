@@ -4,6 +4,7 @@ import SourcePicker from "./SourcePicker";
 import DenoiseFrame from "./DenoiseFrame";
 import type { Generation, InpaintSource } from "../lib/types";
 import { generateImage, type Resolution } from "../lib/openrouter";
+import { MODELS } from "../lib/models";
 import { b64ToDataUrl, copyImageDataUrl, downloadDataUrl } from "../lib/images";
 import { saveGeneration } from "../lib/library";
 import { inpaintSrcParam } from "../lib/route";
@@ -229,7 +230,7 @@ export default function InpaintTab({
         const aspect = nearestAspect(width, height).ratio;
         const res = await generateImage(
           key,
-          { prompt, aspect_ratio: aspect, resolution, refs },
+          { prompt, aspect_ratio: aspect, resolution, refs, model: MODELS.seedream.requestId },
           ctrl.signal
         );
         const outputUrl = b64ToDataUrl(res.b64, res.mediaType);
@@ -256,6 +257,7 @@ export default function InpaintTab({
             cost: res.cost,
             mediaType,
             refUrls: refs,
+            model: MODELS.seedream.requestId,
             inpaint: {
               instruction: trimmed.slice(0, MAX_INSTRUCTION),
               source: source.kind,
@@ -439,7 +441,7 @@ export default function InpaintTab({
                     aria-pressed={resolution === "1K"}
                     onClick={() => setResolution("1K")}
                   >
-                    1K <small>$0.045 / image</small>
+                    1K <small>${MODELS.seedream.price["1K"].toFixed(3)} / image</small>
                   </button>
                   <button
                     type="button"
@@ -447,7 +449,7 @@ export default function InpaintTab({
                     aria-pressed={resolution === "2K"}
                     onClick={() => setResolution("2K")}
                   >
-                    2K <small>$0.09 / image</small>
+                    2K <small>${MODELS.seedream.price["2K"].toFixed(2)} / image</small>
                   </button>
                 </div>
                 {aspectInfo && aspectInfo.error > 0.03 && (

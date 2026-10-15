@@ -27,6 +27,8 @@ export interface SaveGenerationInput {
   refUrls: string[];
   seed?: number;
   inpaint?: Generation["inpaint"];
+  /** Provider request id (Seedream default written explicitly by callers). */
+  model?: string;
 }
 
 /** Encrypt image/thumb/refs, store the record, return the Generation. */
@@ -56,6 +58,7 @@ export async function saveGeneration(input: SaveGenerationInput): Promise<Genera
     thumbUrl: thumb,
     refUrls: [...input.refUrls],
     inpaint: input.inpaint,
+    model: input.model,
   };
   await saveRecord({
     id: gen.id,
@@ -71,6 +74,7 @@ export async function saveGeneration(input: SaveGenerationInput): Promise<Genera
     thumbEnc,
     refsEnc,
     inpaint: gen.inpaint,
+    model: gen.model,
   });
   return gen;
 }
