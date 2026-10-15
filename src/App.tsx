@@ -226,9 +226,8 @@ function GenCard({ g, index, reveal = false, onOpen, onRetry, onCopy, onDownload
         <div className={reveal ? "prompt-snippet r-prompt" : "prompt-snippet"}>{snippet}</div>
         <div className={reveal ? "meta r-meta" : "meta"}>
           {g.inpaint && <span className="tag hl">Inpaint</span>}
-          {modelFor(g.model).id !== DEFAULT_MODEL && (
-            <span className="tag">{modelFor(g.model).short}</span>
-          )}
+          {/* Model tag on every card: same tag count per row keeps the grid uniform. */}
+          <span className="tag">{modelFor(g.model).short}</span>
           <span className="tag">{g.aspectRatio}</span>
           <span className="tag">{g.resolution}</span>
           <span className="tag">{g.mediaType.replace("image/", "")}</span>

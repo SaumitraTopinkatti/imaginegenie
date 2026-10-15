@@ -130,6 +130,58 @@ test("retry restores the record's model", async ({ app }) => {
   await expect(app.getByLabel("Model")).toHaveValue("seedream");
 });
 
+test("card foot pins to the bottom across ragged meta rows", async ({ app }) => {
+  // Mixed tag counts (6-tag inpaint + 4-tag plain) must not stagger the
+  // time/buttons row: feet share a top edge within each grid row.
+  const tallRefs = [pngDataUrl(48, 48, "solid"), pngDataUrl(49, 49, "solid")];
+  await seedLibrary(app, {
+    records: [
+      {
+        prompt: "Wrapped provider prompt for the tall meta card",
+        refCount: 2,
+        refImageUrls: tallRefs,
+        inpaint: {
+          instruction: "Tall meta instruction forcing a six-tag wrap",
+          source: "image",
+          includedOriginal: true,
+          composited: true,
+        },
+      },
+      { prompt: "Short meta no refs" },
+    ],
+  });
+  await app.reload();
+  const cards = app.locator("#gallery .card");
+  await expect(cards).toHaveCount(2);
+  const geom = await cards.evaluateAll((els) =>
+    els.map((c) => {
+      const r = c.getBoundingClientRect();
+      const f = c.querySelector(".foot")!.getBoundingClientRect();
+      const a = c.querySelector(".actions")!.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom, footTop: f.top, footBottom: f.bottom, rightGap: r.right - a.right };
+    })
+  );
+  // Group by grid row; single-column layouts pass vacuously.
+  const rows = new Map<number, typeof geom>();
+  for (const g of geom) {
+    const key = [...rows.keys()].find((t) => Math.abs(t - g.top) < 4) ?? g.top;
+    rows.set(key, [...(rows.get(key) ?? []), g]);
+  }
+  const multiRow = [...rows.values()].some((r) => r.length > 1);
+  if (!multiRow) {
+    // Single column: every foot still hugs its own card bottom.
+    const gaps = geom.map((g) => g.bottom - g.footBottom);
+    expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThan(2);
+    return;
+  }
+  for (const row of rows.values()) {
+    if (row.length < 2) continue;
+    const tops = row.map((g) => g.footTop);
+    expect(Math.max(...tops) - Math.min(...tops)).toBeLessThan(3);
+    const gaps = row.map((g) => g.rightGap);
+    expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThan(2);
+  }
+});
 test("search qwen filters to Qwen records", async ({ app }) => {
   await seedLibrary(app, {
     records: [

@@ -4,6 +4,7 @@ import { AxeBuilder } from "@axe-core/playwright";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { InpaintMeta } from "../src/lib/types";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
@@ -108,6 +109,7 @@ export interface SeedOpts {
     imageUrl?: string;
     refImageUrls?: string[];
     model?: string;
+    inpaint?: InpaintMeta;
   }>;
   references?: Array<{ name?: string; description?: string; group?: string; imageUrl?: string }>;
 }
