@@ -362,7 +362,9 @@ export default function App() {
   const [backupBusy, setBackupBusy] = useState(false);
   const [backupErr, setBackupErr] = useState("");
   const backupFirstInput = useRef<HTMLInputElement>(null);
-  const [viewRef, setViewRef] = useState<string | null>(null);
+  /** Full-size image viewer: a reference url, or a generation opened by
+      clicking its lightbox image (same viewer, generation-aware actions). */
+  const [viewer, setViewer] = useState<{ url: string; gen: Generation | null } | null>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const clearCancelRef = useRef<HTMLButtonElement>(null);
   const clearInputRef = useRef<HTMLInputElement>(null);
@@ -1129,6 +1131,7 @@ export default function App() {
   const delGen = async (id: string) => {
     setGenerations((g) => g.filter((x) => x.id !== id));
     if (lightbox?.id === id) setLightbox(null);
+    setViewer((v) => (v?.gen?.id === id ? null : v));
     try {
       await deleteRecord(id);
       broadcastLibChanged();
@@ -1171,6 +1174,7 @@ export default function App() {
     setClearing(true);
     setGenerations([]);
     setLightbox(null);
+    setViewer(null);
     // Drop any in-flight slots and invalidate their pending merges.
     epochRef.current += 1;
     setSlots([]);
@@ -1205,7 +1209,7 @@ export default function App() {
     const restored = (g.refUrls ?? []).slice(0, restoredCaps.maxRefs);
     setRefs(toRefItems(restored));
     setLightbox(null);
-    setViewRef(null);
+    setViewer(null);
     if (restored.length > 0) {
       pushToast("info", `Settings + ${restored.length} reference(s) restored.`);
     } else {
@@ -1329,7 +1333,7 @@ export default function App() {
       pushToast("ok", `${add.length} references loaded into composer.`);
     }
     setLightbox(null);
-    setViewRef(null);
+    setViewer(null);
     if (window.matchMedia("(max-width: 900px)").matches) setDrawerOpen(true);
     requestAnimationFrame(() => {
       asideRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -1347,7 +1351,7 @@ export default function App() {
   const enterInpaint = (s: InpaintSource) => {
     setInpaintSource(s);
     setLightbox(null);
-    setViewRef(null);
+    setViewer(null);
     inpaintSrcKey.current = { kind: s.kind, id: s.id };
     goTo("inpaint");
   };
@@ -1410,7 +1414,7 @@ export default function App() {
   useEffect(() => {
     setDrawerOpen(false);
     setLightbox(null);
-    setViewRef(null);
+    setViewer(null);
   }, [tab]);
 
   const filtered = useMemo(() => {    const q = search.trim().toLowerCase();
@@ -2245,7 +2249,7 @@ export default function App() {
           <h2 className="visually-hidden">References</h2>
           <ReferencesTab
             onUseReference={useReference}
-            onViewImage={setViewRef}
+            onViewImage={(url) => setViewer({ url, gen: null })}
             pushToast={pushToast}
             onCountChange={setReferenceCount}
           />
@@ -2305,11 +2309,19 @@ export default function App() {
           overlayClassName="overlay"
           panelClassName="lightbox"
         >
-            <img
-              className="full"
-              src={lightbox.imageUrl}
-              alt={lightbox.prompt.slice(0, 120) || "Generated image"}
-            />
+            <button
+              type="button"
+              className="lb-full-btn"
+              title="View full size"
+              aria-label="View generated image full size"
+              onClick={() => setViewer({ url: lightbox.imageUrl, gen: lightbox })}
+            >
+              <img
+                className="full"
+                src={lightbox.imageUrl}
+                alt={lightbox.prompt.slice(0, 120) || "Generated image"}
+              />
+            </button>
             <div className="lb-side">
               <h3>Generation</h3>
               {lightbox.inpaint ? (
@@ -2375,7 +2387,7 @@ export default function App() {
                             className="ref-cell-img"
                             title="View full size"
                             aria-label={`View reference ${i + 1} full size`}
-                            onClick={() => setViewRef(u)}
+                            onClick={() => setViewer({ url: u, gen: null })}
                           >
                             <img src={u} alt={`Reference ${i + 1}`} loading="lazy" />
                           </button>
@@ -2394,7 +2406,7 @@ export default function App() {
                               className="icon-btn"
                               title="View full size"
                               aria-label={`View reference ${i + 1} full size`}
-                              onClick={() => setViewRef(u)}
+                              onClick={() => setViewer({ url: u, gen: null })}
                             >
                               <EyeIcon size={13} />
                             </button>
@@ -2496,40 +2508,56 @@ export default function App() {
         </Dialog>
       )}
 
-      {/* reference full view */}
-      {viewRef && (
+      {/* full-size image viewer (references + lightbox image clicks) */}
+      {viewer && (
         <Dialog
-          label="Reference image"
-          onClose={() => setViewRef(null)}
+          label={viewer.gen ? "Generated image" : "Reference image"}
+          onClose={() => setViewer(null)}
           panelClassName="ref-view"
         >
-            <img src={viewRef} alt="Reference full size" />
+            <img
+              src={viewer.url}
+              alt={
+                viewer.gen
+                  ? viewer.gen.prompt.slice(0, 120) || "Generated image full size"
+                  : "Reference full size"
+              }
+            />
             <div className="ref-view-bar">
               <button
                 type="button"
                 className="btn btn-small"
-                onClick={() => void copyImage(viewRef)}
+                onClick={() => void copyImage(viewer.url)}
               >
                 <CopyIcon size={14} /> Copy image
               </button>
               <button
                 type="button"
                 className="btn btn-small"
-                onClick={() => reuseRefs([viewRef])}
+                onClick={() => reuseRefs([viewer.url])}
               >
                 <UploadIcon size={14} /> Load into composer
               </button>
               <button
                 type="button"
                 className="btn btn-small"
-                onClick={() => enterInpaint({ url: viewRef, kind: "image", label: "Reference image" })}
+                onClick={() =>
+                  viewer.gen
+                    ? enterInpaint({
+                        url: viewer.gen.imageUrl,
+                        kind: "generation",
+                        id: viewer.gen.id,
+                        label: (viewer.gen.inpaint?.instruction || viewer.gen.prompt).slice(0, 60),
+                      })
+                    : enterInpaint({ url: viewer.url, kind: "image", label: "Reference image" })
+                }
               >
                 <BrushIcon size={14} /> Inpaint
               </button>
               <button
                 type="button"
                 className="btn btn-small btn-ghost"
-                onClick={() => setViewRef(null)}
+                onClick={() => setViewer(null)}
               >
                 <CloseIcon size={14} /> Close
               </button>

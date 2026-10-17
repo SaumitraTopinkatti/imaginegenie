@@ -128,6 +128,24 @@ test("hero loader stays square across mid-run shape change", async ({ app }) => 
   expect((reqs[0].body as Record<string, unknown>).aspect_ratio).toBe("16:9");
 });
 
+test("lightbox image click opens the full-size viewer", async ({ app }) => {
+  await seedLibrary(app, { records: [{ prompt: "Viewer subject" }] });
+  await app.reload();
+  await app.getByRole("button", { name: /^Open image 1:/ }).click();
+  const lightbox = app.getByRole("dialog", { name: "Generation details" });
+  await expect(lightbox).toBeVisible();
+  await lightbox.getByRole("button", { name: "View generated image full size" }).click();
+  const viewer = app.getByRole("dialog", { name: "Generated image" });
+  await expect(viewer).toBeVisible();
+  await expect(viewer.locator("img").first()).toBeVisible();
+  // Layered Esc: viewer closes, lightbox stays.
+  await app.keyboard.press("Escape");
+  await expect(viewer).toBeHidden();
+  await expect(lightbox).toBeVisible();
+  await app.keyboard.press("Escape");
+  await expect(lightbox).toBeHidden();
+});
+
 test("reveal: square loader, same grid position, no jump", async ({ app }) => {
   // A seeded record forces the grid layout (a lone slot renders the hero).
   await seedLibrary(app, { records: [{ prompt: "Grid anchor" }] });

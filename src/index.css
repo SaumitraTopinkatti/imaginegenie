@@ -542,6 +542,9 @@ select {
   display: grid; grid-template-columns: 1.35fr 1fr;
 }
 .lightbox img.full { width: 100%; height: 100%; object-fit: contain; background: var(--surface-2); min-height: 320px; max-height: 92vh; }
+/* lightbox image opens the full-size viewer (same as reference thumbs) */
+.lb-full-btn { display: block; width: 100%; min-width: 0; padding: 0; border: 0; background: var(--surface-2); cursor: zoom-in; }
+.lb-full-btn:hover img.full { filter: brightness(0.94); }
 .lb-side { padding: 22px; display: flex; flex-direction: column; gap: 14px; }
 .lb-side h3 { margin: 0; font-size: 16px; }
 .lb-prompt { font-size: 13px; line-height: 1.65; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 12px; max-height: 220px; overflow: auto; white-space: pre-wrap; }
@@ -670,6 +673,7 @@ select {
 .stepper button:active:not(:disabled), .drawer-item:active, .peek-bar:active,
 .menu-pop button:active, .ref-suggest-pop button:active,
 .shape-toggle:active, .lib-link:active, .eye:active,
+.lb-full-btn:active,
 .ref-cell-img:active, .ref-thumb .rm:active, .ref-thumb .mv button:active { filter: brightness(0.93); }
 
 /* ---------- Scrollbars (light) ---------- */
