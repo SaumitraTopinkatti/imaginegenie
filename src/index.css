@@ -37,6 +37,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 ::selection { background: var(--teal-soft); }
+/* any open dialog locks body scroll (toggled with the inert state) */
+body.dialog-open { overflow: hidden; }
 /* static chrome text is not selectable; dynamic values opt back in below */
 body { -webkit-user-select: none; user-select: none; }
 /* D10 keep-mounted tabs hide with `hidden`: author display rules elsewhere
@@ -369,6 +371,9 @@ select {
 /* Button text never spills: labels live in a truncating span, never as a
    bare centred text node (N12). */
 .btn > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* viewport-swapped short labels: the accessible name (aria-label) never
+ * changes, only the visible text does. */
+.lbl-short { display: none; }
 .btn:hover:not(:disabled) { box-shadow: inset 0 0 0 999px rgba(18, 32, 30, 0.05); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-ghost { background: transparent; }
@@ -542,6 +547,11 @@ select {
   display: grid; grid-template-columns: 1.35fr 1fr;
 }
 .lightbox img.full { width: 100%; height: 100%; object-fit: contain; background: var(--surface-2); min-height: 320px; max-height: 92vh; }
+/* mobile-only chrome: the ≤900px sheet header/scroll-body/dock. Desktop
+ * keeps the two-column grid, so the wrappers vanish (display: contents). */
+.lb-mobile-head { display: none; }
+.lb-body { display: contents; }
+.lb-dock { display: none; }
 /* lightbox image opens the full-size viewer (same as reference thumbs) */
 .lb-full-btn { display: block; width: 100%; min-width: 0; padding: 0; border: 0; background: var(--surface-2); cursor: zoom-in; }
 .lb-full-btn:hover img.full { filter: brightness(0.94); }
@@ -617,6 +627,12 @@ select {
 
 /* ---------- Confirm dialog ---------- */
 .overlay-top { z-index: 160; }
+/* coarse pointers: dialog controls meet thumb-target sizes */
+@media (pointer: coarse) {
+  .overlay .btn-small { height: auto; min-height: 44px; }
+  .ref-cell-actions .icon-btn { width: 32px; height: 32px; }
+  .lb-sent summary { min-height: 44px; display: flex; align-items: center; }
+}
 .confirm-card {
   width: min(380px, 92vw);
   background: var(--surface); border: 1px solid var(--line); border-radius: 18px;
@@ -663,6 +679,7 @@ select {
   .ref-cell-actions { opacity: 1; }
 }
 .ref-view { width: min(880px, 94vw); background: var(--surface); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow); padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.ref-view-img { display: contents; }
 .ref-view img { width: 100%; max-height: 76vh; object-fit: contain; border-radius: 12px; background: var(--surface-2); }
 .ref-view-bar { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 
@@ -673,7 +690,7 @@ select {
 .stepper button:active:not(:disabled), .drawer-item:active, .peek-bar:active,
 .menu-pop button:active, .ref-suggest-pop button:active,
 .shape-toggle:active, .lib-link:active, .eye:active,
-.lb-full-btn:active,
+.lb-full-btn:active, .lb-dock .btn:active, .ref-view-bar .btn:active,
 .ref-cell-img:active, .ref-thumb .rm:active, .ref-thumb .mv button:active { filter: brightness(0.93); }
 
 /* ---------- Scrollbars (light) ---------- */
@@ -763,7 +780,9 @@ html {
     transition: opacity 0.25s ease, transform 0.25s ease;
   }
   .peek-bar.peek-hidden { opacity: 0; pointer-events: none; transform: translateY(16px); }
-  .peek-bar:hover { box-shadow: inset 0 0 0 999px rgba(0, 0, 0, 0.12), 0 14px 40px rgba(18, 32, 30, 0.3); }
+  /* an open dialog owns the screen: fade the peek bar so it never shows
+     through the overlay or eats thumb taps meant for the dialog */
+  body.dialog-open .peek-bar { opacity: 0; pointer-events: none; }  .peek-bar:hover { box-shadow: inset 0 0 0 999px rgba(0, 0, 0, 0.12), 0 14px 40px rgba(18, 32, 30, 0.3); }
   .sheet-backdrop { display: block; position: fixed; inset: 0; z-index: 80; background: rgba(18, 32, 30, 0.32); }
   /* toasts sit above the peek bar, never over it */
   .toasts { bottom: calc(84px + env(safe-area-inset-bottom)); }
@@ -779,8 +798,66 @@ html {
   .drawer-brand .genie { font-family: var(--font-title); font-style: italic; font-weight: 400; }
   .icon-btn { width: 34px; height: 34px; }
   .chip { height: 34px; }
-  .lightbox { grid-template-columns: 1fr; }
-  .lightbox img.full { max-height: 52vh; }
+  /* input-free confirms become bottom thumb sheets (delete, clear-1, discard) */
+  .overlay-thumb { place-items: end center; padding: 20px 16px calc(20px + env(safe-area-inset-bottom)); }
+  .overlay-thumb .confirm-card { width: 100%; max-width: 520px; border-radius: 22px; }
+  .overlay-thumb .confirm-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .overlay-thumb .confirm-actions .btn { min-height: 48px; margin: 0; }
+  /* viewer goes edge-to-edge: image fills the screen, bar pinned to the thumb */
+  .viewer-overlay { padding: 0; }
+  .ref-view {
+    width: 100%; max-width: none; height: 100dvh; max-height: none;
+    border: none; border-radius: 0; box-shadow: none;
+    padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
+  }
+  .ref-view-img { display: flex; flex: 1 1 auto; min-height: 0; }
+  .ref-view img { flex: 1 1 auto; min-height: 0; max-height: none; }
+  .ref-view-bar {
+    display: grid; grid-template-columns: 1fr 1.5fr 1fr 1fr; gap: 8px; flex: none;
+  }  .ref-view-bar .btn {
+    flex-direction: column; gap: 4px;
+    min-height: 52px; font-size: 12px; margin: 0; padding: 8px 6px;
+  }
+  /* stacked labels wrap to two lines instead of spilling the cell */
+  .ref-view-bar .btn > span {
+    white-space: normal; text-align: center; line-height: 1.3;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  /* long labels swap to their short form; aria-label keeps the full name */
+  .ref-view-bar .btn > span.lbl-long { display: none; }
+  .ref-view-bar .btn > span.lbl-short { display: -webkit-box; }
+  .lightbox {
+    display: flex; flex-direction: column;
+    align-self: end; width: 100%;
+    height: 94dvh; max-height: 94dvh;
+    border-radius: 22px; overflow: hidden;
+  }
+  .lightbox img.full { min-height: 0; max-height: 52vh; }
+  .lb-mobile-head {
+    display: block; flex: none;
+    padding: 10px 20px 12px;
+    background: var(--surface); border-bottom: 1px solid var(--line);
+    text-align: center;
+  }
+  .lb-mobile-title { display: block; font-size: 14px; font-weight: 700; }
+  .lb-body {
+    display: flex; flex-direction: column;
+    flex: 1 1 auto; min-height: 0;
+    overflow-y: auto; overscroll-behavior: contain;
+  }
+  .lb-side h3 { display: none; }
+  .lb-body-close { display: none; }
+  /* pinned thumb dock: key actions + Close right-most, no scrolling needed */
+  .lb-dock {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; flex: none;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    background: var(--surface); border-top: 1px solid var(--line);
+  }
+  .lb-dock .btn {
+    flex-direction: column; gap: 4px;
+    min-height: 48px; font-size: 12px;
+  }
 }
 @media (min-width: 901px) {
   .peek-bar, .sheet-backdrop { display: none !important; }

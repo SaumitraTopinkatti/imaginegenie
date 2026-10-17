@@ -4,6 +4,9 @@
  * (optional `?src=gen:<id>` / `?src=ref:<id>` deep link). Hash routes were
  * rejected: skip links already use fragments (`#gallery`, `#ref-library`,
  * `#inpaint-main`). DOM-free — callers pass in pathname/search.
+ *
+ * Raw History writes live in `historyLayers.ts` only (modal Back-to-close
+ * entries + the popstate choke point): route here, never pushState there.
  */
 
 export type TabId = "studio" | "refs" | "inpaint";

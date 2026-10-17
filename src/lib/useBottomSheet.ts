@@ -1,5 +1,6 @@
 import { useEffect, useRef, type TouchEventHandler } from "react";
 import { hasOpenDialog } from "../components/Dialog";
+import { useHistoryLayer } from "./useHistoryLayer";
 
 /** Mobile sheet breakpoint, shared with Studio's drawer rules. */
 export const SHEET_MQ = "(max-width: 900px)";
@@ -33,6 +34,8 @@ export function useBottomSheet({
   const setOpenRef = useRef(setOpen);
   setOpenRef.current = setOpen;
   const touchY = useRef<number | null>(null);
+  // Back closes the sheet on mobile (desktop auto-close below nets out).
+  useHistoryLayer(open, () => setOpenRef.current(false));
 
   // Desktop kills the sheet (same rule as Studio's drawer).
   useEffect(() => {

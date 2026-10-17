@@ -727,6 +727,7 @@ export default function ReferencesTab({
           describedBy="ref-del-desc"
           onClose={() => setPendingDelete(null)}
           initialFocusRef={deleteCancelRef}
+          overlayClassName="overlay overlay-top overlay-thumb"
         >
             <h3 id="ref-del-title">Delete this reference?</h3>
             <p id="ref-del-desc">
@@ -760,6 +761,7 @@ export default function ReferencesTab({
           describedBy="ref-clear-desc"
           onClose={() => setConfirmClear(false)}
           initialFocusRef={clearCancelRef}
+          overlayClassName="overlay overlay-top overlay-thumb"
         >
             <h3 id="ref-clear-title">Delete all {items.length} references?</h3>
             <p id="ref-clear-desc">

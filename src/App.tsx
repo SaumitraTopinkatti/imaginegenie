@@ -82,6 +82,9 @@ import {
   type TabId,
 } from "./lib/route";
 import { listReferenceThumbs, loadReferenceImage } from "./lib/library";
+import { navigate, onRoutePop, replaceUrl } from "./lib/historyLayers";
+import { useHistoryLayer } from "./lib/useHistoryLayer";
+import { useSwipeDismiss } from "./lib/useSwipeDismiss";
 import { useBottomSheet } from "./lib/useBottomSheet";
 import DenoiseFrame from "./components/DenoiseFrame";
 import Dialog, { hasOpenDialog } from "./components/Dialog";
@@ -365,6 +368,15 @@ export default function App() {
   /** Full-size image viewer: a reference url, or a generation opened by
       clicking its lightbox image (same viewer, generation-aware actions). */
   const [viewer, setViewer] = useState<{ url: string; gen: Generation | null } | null>(null);
+  // Mobile swipe-down dismisses the lightbox (body only when scrolled to top).
+  const lbBodyRef = useRef<HTMLDivElement>(null);
+  const lbBodySwipe = useSwipeDismiss({
+    onDismiss: () => setLightbox(null),
+    canStart: () => (lbBodyRef.current?.scrollTop ?? 0) === 0,
+  });
+  const lbHeadSwipe = useSwipeDismiss({ onDismiss: () => setLightbox(null) });
+  // Mobile viewer: the image fills the screen, swipe-down anywhere on it goes back.
+  const viewerSwipe = useSwipeDismiss({ onDismiss: () => setViewer(null) });
   const cancelRef = useRef<HTMLButtonElement>(null);
   const clearCancelRef = useRef<HTMLButtonElement>(null);
   const clearInputRef = useRef<HTMLInputElement>(null);
@@ -395,17 +407,15 @@ export default function App() {
    *  InpaintTab via onInpaintSourceChange and set by entry points. */
   const inpaintSrcKey = useRef<{ kind: string; id?: string } | null>(null);
   /** Single funnel for every tab switch (routing rule): state + URL move
-   *  together. Never call setTab directly. */
+   *  together. Never call setTab directly. URL writes go through
+   *  historyLayers so modal entries unwind before the route pushes. */
   const goTo = useCallback((id: TabId, opts?: { replace?: boolean }) => {
     setTab(id);
     setNavOpen(false);
     const want =
       id === "inpaint" ? `/inpaint${inpaintSrcParam(inpaintSrcKey.current)}` : TAB_PATHS[id];
     const cur = window.location.pathname + window.location.search;
-    if (cur !== want) {
-      if (opts?.replace) window.history.replaceState(null, "", want);
-      else window.history.pushState(null, "", want);
-    }
+    if (cur !== want) navigate(want, opts);
   }, []);
   /* ----- expose active tab for page-scroll locking (studio locks, refs scrolls) ----- */
   useEffect(() => {
@@ -428,7 +438,7 @@ export default function App() {
   // Unknown path → Studio + canonical URL (never strand on a dead route).
   useEffect(() => {
     if (tabFromPath(window.location.pathname) === null) {
-      window.history.replaceState(null, "", "/");
+      replaceUrl("/");
     }
   }, []);
   // Back/forward: URL is the source of truth. Dialogs portal to body so they
@@ -438,11 +448,13 @@ export default function App() {
       ? parseInpaintSrc(window.location.search)
       : null
   );
+  // Back/forward across routes: historyLayers calls back only for user pops
+  // that change the base URL (layer-only pops close modals, never route).
   useEffect(() => {
-    const onPop = () => {
+    return onRoutePop(() => {
       const t = tabFromPath(window.location.pathname);
       if (!t) {
-        window.history.replaceState(null, "", "/");
+        replaceUrl("/");
         setTab("studio");
         setNavOpen(false);
         return;
@@ -450,9 +462,7 @@ export default function App() {
       setTab(t);
       setNavOpen(false);
       setDeepSrc(t === "inpaint" ? parseInpaintSrc(window.location.search) : null);
-    };
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
+    });
   }, []);
   useEffect(() => {
     if (tab === "inpaint") setInpaintSeen(true);
@@ -515,6 +525,8 @@ export default function App() {
   /* ----- key modal: Dialog moves focus in, traps Tab, layered-Esc, returns focus ----- */
 
   /* ----- side drawer: Esc closes it, focus moves in on open ----- */
+  // Back closes it too (same rule as dialogs and sheets).
+  useHistoryLayer(navOpen, () => setNavOpen(false));
   useEffect(() => {
     if (!navOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -1378,7 +1390,7 @@ export default function App() {
         });
       } else {
         pushToast("info", "That image isn't in the library anymore.");
-        window.history.replaceState(null, "", "/inpaint");
+        replaceUrl("/inpaint");
       }
       return;
     }
@@ -1394,7 +1406,7 @@ export default function App() {
         });
       } catch {
         pushToast("info", "That image isn't in the library anymore.");
-        window.history.replaceState(null, "", "/inpaint");
+        replaceUrl("/inpaint");
       }
     })();
   }, [deepSrc, historyLoading, generations, pushToast]);
@@ -2309,6 +2321,11 @@ export default function App() {
           overlayClassName="overlay"
           panelClassName="lightbox"
         >
+            <div className="lb-mobile-head" aria-hidden="true" {...lbHeadSwipe}>
+              <span className="grab-handle" />
+              <span className="lb-mobile-title">Generation</span>
+            </div>
+            <div className="lb-body" ref={lbBodyRef} {...lbBodySwipe}>
             <button
               type="button"
               className="lb-full-btn"
@@ -2494,7 +2511,7 @@ export default function App() {
                 </button>
                 <button
                   type="button"
-                  className="btn btn-small btn-ghost"
+                  className="btn btn-small btn-ghost lb-body-close"
                   onClick={() => setLightbox(null)}
                 >
                   <CloseIcon size={14} /> Close
@@ -2505,6 +2522,44 @@ export default function App() {
                 {lightbox.id.slice(0, 8)}
               </div>
             </div>
+            </div>
+            <div className="lb-dock" role="group" aria-label="Quick actions">
+              <button
+                type="button"
+                className="btn lb-dock-btn"
+                onClick={() => void copyImage(lightbox.imageUrl)}
+              >
+                <CopyIcon size={16} /> <span>Copy</span>
+              </button>
+              <button
+                type="button"
+                className="btn lb-dock-btn"
+                onClick={() =>
+                  enterInpaint({
+                    url: lightbox.imageUrl,
+                    kind: "generation",
+                    id: lightbox.id,
+                    label: (lightbox.inpaint?.instruction || lightbox.prompt).slice(0, 60),
+                  })
+                }
+              >
+                <BrushIcon size={16} /> <span>Inpaint</span>
+              </button>
+              <button
+                type="button"
+                className="btn lb-dock-btn"
+                onClick={() => retryGen(lightbox)}
+              >
+                <HistoryIcon size={16} /> <span>Retry</span>
+              </button>
+              <button
+                type="button"
+                className="btn lb-dock-btn"
+                onClick={() => setLightbox(null)}
+              >
+                <CloseIcon size={16} /> <span>Close</span>
+              </button>
+            </div>
         </Dialog>
       )}
 
@@ -2513,30 +2568,35 @@ export default function App() {
         <Dialog
           label={viewer.gen ? "Generated image" : "Reference image"}
           onClose={() => setViewer(null)}
+          overlayClassName="overlay overlay-top viewer-overlay"
           panelClassName="ref-view"
         >
-            <img
-              src={viewer.url}
-              alt={
-                viewer.gen
-                  ? viewer.gen.prompt.slice(0, 120) || "Generated image full size"
-                  : "Reference full size"
-              }
-            />
+            <div className="ref-view-img" {...viewerSwipe}>
+              <img
+                src={viewer.url}
+                alt={
+                  viewer.gen
+                    ? viewer.gen.prompt.slice(0, 120) || "Generated image full size"
+                    : "Reference full size"
+                }
+              />
+            </div>
             <div className="ref-view-bar">
               <button
                 type="button"
                 className="btn btn-small"
                 onClick={() => void copyImage(viewer.url)}
               >
-                <CopyIcon size={14} /> Copy image
+                <CopyIcon size={14} /> <span>Copy image</span>
               </button>
               <button
                 type="button"
                 className="btn btn-small"
+                aria-label="Load into composer"
                 onClick={() => reuseRefs([viewer.url])}
               >
-                <UploadIcon size={14} /> Load into composer
+                <UploadIcon size={14} /> <span className="lbl-long">Load into composer</span>
+                <span className="lbl-short" aria-hidden="true">Load</span>
               </button>
               <button
                 type="button"
@@ -2552,14 +2612,14 @@ export default function App() {
                     : enterInpaint({ url: viewer.url, kind: "image", label: "Reference image" })
                 }
               >
-                <BrushIcon size={14} /> Inpaint
+                <BrushIcon size={14} /> <span>Inpaint</span>
               </button>
               <button
                 type="button"
                 className="btn btn-small btn-ghost"
                 onClick={() => setViewer(null)}
               >
-                <CloseIcon size={14} /> Close
+                <CloseIcon size={14} /> <span>Close</span>
               </button>
             </div>
         </Dialog>
@@ -2573,6 +2633,7 @@ export default function App() {
           describedBy="del-desc"
           onClose={() => setPendingDelete(null)}
           initialFocusRef={cancelRef}
+          overlayClassName="overlay overlay-top overlay-thumb"
         >
             <h3 id="del-title">Delete this image?</h3>
             <p id="del-desc">This removes it from the encrypted library.</p>
@@ -2608,6 +2669,10 @@ export default function App() {
           labelledBy={clearStep === 1 ? "clear-title-1" : "clear-title-2"}
           describedBy={clearStep === 1 ? "clear-desc-1" : "clear-desc-2"}
           onClose={abortClear}
+          // Step 1 has no inputs: bottom thumb sheet. Step 2 types DELETE.
+          overlayClassName={
+            clearStep === 1 ? "overlay overlay-top overlay-thumb" : undefined
+          }
           initialFocusRef={clearStep === 1 ? clearCancelRef : clearInputRef}
           // Launched from the Library menu, which closes (unmounting the
           // item) before this opens: return to the stable menu trigger.

@@ -561,6 +561,7 @@ const MaskEditor = forwardRef<MaskEditorHandle, MaskEditorProps>(function MaskEd
           labelledBy="discard-mask-title"
           describedBy="discard-mask-desc"
           onClose={() => setPendingSource(null)}
+          overlayClassName="overlay overlay-top overlay-thumb"
         >
           <h3 id="discard-mask-title">Discard mask?</h3>
           <p id="discard-mask-desc">Switching images clears the current paint strokes.</p>

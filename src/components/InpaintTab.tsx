@@ -8,6 +8,7 @@ import { MODELS } from "../lib/models";
 import { b64ToDataUrl, copyImageDataUrl, downloadDataUrl } from "../lib/images";
 import { saveGeneration } from "../lib/library";
 import { inpaintSrcParam } from "../lib/route";
+import { replaceUrl } from "../lib/historyLayers";
 import {
   MAX_INSTRUCTION,
   buildInpaintPrompt,
@@ -116,7 +117,7 @@ export default function InpaintTab({
     if (hidden || !source) return;
     const want = `/inpaint${inpaintSrcParam(source)}`;
     const cur = window.location.pathname + window.location.search;
-    if (cur !== want) window.history.replaceState(null, "", want);
+    if (cur !== want) replaceUrl(want);
   }, [source, hidden]);
 
   // Going hidden (tab switch, back/forward) closes the picker and any open

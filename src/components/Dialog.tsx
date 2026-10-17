@@ -6,6 +6,7 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
+import { registerLayer } from "../lib/historyLayers";
 
 /**
  * Shared accessible dialog shell (S2/S3/S13).
@@ -36,6 +37,9 @@ function syncInert(): void {
   const root = document.getElementById("root");
   if (!root) return;
   (root as HTMLElement & { inert?: boolean }).inert = stack.length > 0;
+  // Class (not inline style): useBottomSheet clears body.style.overflow and
+  // would clobber an inline lock set here.
+  document.body.classList.toggle("dialog-open", stack.length > 0);
 }
 
 function onWindowKey(e: globalThis.KeyboardEvent): void {
@@ -69,6 +73,9 @@ export interface DialogProps {
   labelledBy?: string;
   describedBy?: string;
   onClose: () => void;
+  /** Register a Back-to-close history entry (default true). Opt out for
+      ephemeral layers that must never own an entry. */
+  history?: boolean;
   /** Focused on open; defaults to the first focusable control. */
   initialFocusRef?: RefObject<HTMLElement | null>;
   /** Focused on close; defaults to the opener. Needed when the opener
@@ -85,6 +92,7 @@ export default function Dialog({
   labelledBy,
   describedBy,
   onClose,
+  history = true,
   initialFocusRef,
   returnFocusRef,
   overlayClassName = "overlay overlay-top",
@@ -102,6 +110,9 @@ export default function Dialog({
     const opener = document.activeElement as HTMLElement | null;
     const entry: StackEntry = { close: () => closeRef.current() };
     stack.push(entry);
+    // Back closes this layer through the same onClose (focus/inert intact).
+    // The history prop is mount-time only, like the rest of this effect.
+    const unregister = history ? registerLayer(() => closeRef.current()) : () => {};
     syncInert();
     // Focus in: explicit target, else first control, else the panel itself.
     const panel = panelRef.current;
@@ -115,6 +126,7 @@ export default function Dialog({
     return () => {
       const i = stack.indexOf(entry);
       if (i >= 0) stack.splice(i, 1);
+      unregister();
       syncInert();
       // Focus return: explicit target first (opener unmounted with launch),
       // then the opener when still in the document (skipped when e.g. its
