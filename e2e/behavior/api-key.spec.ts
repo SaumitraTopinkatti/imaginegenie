@@ -33,6 +33,19 @@ test("test err announced via role=alert", async ({ app }) => {
   await expect(app.getByRole("alert")).toContainText("Key rejected");
 });
 
+test("rejected key badge reads Check key until the key changes", async ({ app }) => {
+  await fillKey(app, "sk-or-test-401");
+  await openKeyModal(app);
+  await app.getByRole("button", { name: "Test", exact: true }).click();
+  await expect(app.getByRole("alert")).toContainText("Key rejected");
+  await app.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(app.getByRole("button", { name: /OpenRouter API key.*Check key/ })).toBeVisible();
+  await openKeyModal(app);
+  await app.getByRole("textbox", { name: "OpenRouter API key" }).fill("sk-or-test-ok");
+  await app.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(app.getByRole("button", { name: /OpenRouter API key.*Connected/ })).toBeVisible();
+});
+
 test("pasted Bearer/quotes/whitespace normalises in the field", async ({ app }) => {
   await openKeyModal(app);
   await app.getByRole("textbox", { name: "OpenRouter API key" }).fill(MANGLED);

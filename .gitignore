@@ -7,6 +7,7 @@ output*.png
 *.log
 a11y/axe-results.json
 a11y/states/
+a11y/shots/
 e2e-results/
 playwright-report/
 poc-models-parked.md

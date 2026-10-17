@@ -31,3 +31,6 @@ npm run build && npm run a11y
 - `npm run e2e` → `build` + `e2e:build` + all Playwright projects (full suite).
 - `npm run e2e:keyboard` → Playwright `e2e/keyboard` only (dialog contracts,
   fastest signal for focus/Esc/return work).
+- `npm run e2e:shots` → `scripts/e2e-shots.mjs`: env-gated viewport PNGs per
+  state into `a11y/shots/` (gitignored) + ordered `manifest.json` + contact
+  sheet; review per `e2e/VISUAL-REVIEW.md`, never gates.

@@ -17,6 +17,7 @@
     "e2e": "npm run build && npm run e2e:build && playwright test",
     "e2e:a11y": "playwright test e2e/a11y e2e/emulation --project=desktop --project=mobile --project=reduced-motion --project=forced-colors && node scripts/e2e-merge-axe.mjs",
     "e2e:keyboard": "playwright test e2e/keyboard",
+    "e2e:shots": "npm run e2e:build && node scripts/e2e-shots.mjs",
     "a11y:all": "npm run lint:a11y && npm run build && npm run a11y && npm run e2e:build && npm run e2e:a11y",
     "mock:api": "node e2e/mock-api/server.mjs"
   },

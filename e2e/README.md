@@ -13,6 +13,8 @@ the fixture fails the test if the guard ever fires.
 - `npm run e2e:a11y` — state + emulation suites (desktop, mobile,
   reduced-motion, forced-colors) + merge into `a11y/axe-results.json`.
 - `npm run e2e:keyboard` — dialog contracts + keyboard specs.
+- `npm run e2e:shots` — viewport PNGs per state (`a11y/shots/`, gitignored) +
+  ordered manifest + contact sheet; review per `VISUAL-REVIEW.md`, never gates.
 - `npm run a11y:all` — `lint:a11y` → `build` → `a11y` → `e2e:build` → `e2e:a11y`.
 - `npm run mock:api` — mock server standalone (manual poking).
 - `npm run typecheck:e2e` — `tsc` over `src/` + `e2e/` (drift guard included).
@@ -132,6 +134,7 @@ Ports (env-overridable): app 4190 (`E2E_APP_PORT`), mock API 4191
 - `aria-valid-attr-value` incomplete on `button[aria-haspopup="true"]`
   (lib-menu-open): reviewed, kept scoped — `true` is spec-valid, popup is
   role=group so no narrower token applies; axe cannot verify popup type.
-- No screen-reader automation, no visual regression, no CI provider config.
+- No screen-reader automation, no visual-regression assertions (manual review
+  via `VISUAL-REVIEW.md`), no CI provider config.
 - eslint 9.39.5 prints a deprecation notice (pinned; jsx-a11y 6.10.2 needs the
   9.x line). Node 18.18+ required by eslint 9.

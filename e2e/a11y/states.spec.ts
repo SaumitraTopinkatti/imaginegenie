@@ -367,7 +367,7 @@ test("inpaint-empty", async ({ app }) => {
 
 test("inpaint-picker-open", async ({ app }) => {
   skipUnlessEmu("inpaint-picker-open");
-  await seedLibrary(app, { records: [{ prompt: "Picker subject" }] });
+  await seedLibrary(app, { records: [{ prompt: "Picker subject", imageUrl: pngDataUrl(256, 256, "solid") }] });
   await app.reload();
   await gotoTab(app, "inpaint");
   await openSourcePicker(app);
@@ -376,7 +376,7 @@ test("inpaint-picker-open", async ({ app }) => {
 
 test("inpaint-editing", async ({ app }) => {
   skipUnlessEmu("inpaint-editing");
-  await seedLibrary(app, { records: [{ prompt: "Editing subject" }] });
+  await seedLibrary(app, { records: [{ prompt: "Editing subject", imageUrl: pngDataUrl(256, 256, "solid") }] });
   await app.reload();
   await gotoTab(app, "inpaint");
   await pickFirstGeneration(app);
@@ -386,7 +386,7 @@ test("inpaint-editing", async ({ app }) => {
 
 test("inpaint-result", async ({ app }) => {
   skipUnlessEmu("inpaint-result");
-  await seedLibrary(app, { records: [{ prompt: "Result source" }] });
+  await seedLibrary(app, { records: [{ prompt: "Result source", imageUrl: pngDataUrl(256, 256, "solid") }] });
   await app.reload();
   await fillKey(app, "sk-or-test-ok");
   await gotoTab(app, "inpaint");
@@ -409,7 +409,7 @@ test("mobile-sheet-open", async ({ app }) => {
 test("inpaint-sheet-open", async ({ app }) => {
   skipUnlessEmu("inpaint-sheet-open");
   test.skip(test.info().project.name !== "mobile", "mobile sheet only");
-  await seedLibrary(app, { records: [{ prompt: "Sheet state scene" }] });
+  await seedLibrary(app, { records: [{ prompt: "Sheet state scene", imageUrl: pngDataUrl(256, 256, "solid") }] });
   await app.reload();
   await gotoTab(app, "inpaint");
   await pickFirstGeneration(app);

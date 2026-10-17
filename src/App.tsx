@@ -1558,13 +1558,13 @@ export default function App() {
               onClick={() => {
                 openKeyModal();
               }}
-              title={(apiKey.trim() || rememberKey) ? "API key connected — manage key" : "Add your OpenRouter API key"}
+              title={!apiKey.trim() && !rememberKey ? "Add your OpenRouter API key" : keyMsg.kind === "err" ? "API key rejected — check key" : "API key connected — manage key"}
               aria-haspopup="dialog"
             >
               <KeyIcon size={15} />
               <span className="visually-hidden">OpenRouter API key: </span>
               <span className="key-mask" aria-hidden="true">{apiKey.trim() ? maskKey(apiKey.trim()) : rememberKey ? "••••••" : "no key"}</span>
-              <span className="key-state">{apiKey.trim() || rememberKey ? "Connected" : "Not set"}</span>
+              <span className="key-state">{!apiKey.trim() && !rememberKey ? "Not set" : keyMsg.kind === "err" ? "Check key" : "Connected"}</span>
             </button>
           </div>
         </div>
@@ -2776,7 +2776,12 @@ export default function App() {
                 value={apiKey}
                 autoComplete="off"
                 spellCheck={false}
-                onChange={(e) => setApiKey(normalizeApiKey(e.target.value))}
+                onChange={(e) => {
+                  setApiKey(normalizeApiKey(e.target.value));
+                  // A new key is untested: drop a stale Test verdict so the
+                  // header badge never reports the previous key's outcome.
+                  setKeyMsg({ text: "", kind: "" });
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") void doTest();
                 }}

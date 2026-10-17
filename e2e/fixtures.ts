@@ -340,6 +340,51 @@ export async function assertLayeredEsc(
   await expect(b).toBeHidden();
 }
 
+/* ---------- shot capture (visual review, env-gated) ---------- */
+
+// Best-effort viewport screenshot for human/model visual review. Runs only
+// when E2E_SHOTS_RUN is set (by scripts/e2e-shots.mjs) on desktop/mobile.
+// Never throws: capture failure must not fail the a11y test.
+export async function captureShot(page: Page, state: string): Promise<void> {
+  const runId = process.env.E2E_SHOTS_RUN;
+  if (!runId) return;
+  const project = test.info().project.name.replace(/[^a-z0-9-]+/gi, "-");
+  if (project !== "desktop" && project !== "mobile") return;
+  try {
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const dir = join(ROOT, "a11y/shots");
+    mkdirSync(dir, { recursive: true });
+    try {
+      await page.evaluate(() => Promise.race([
+        document.fonts.ready,
+        new Promise((r) => setTimeout(r, 3000)),
+      ]));
+    } catch { /* font wait is advisory */ }
+    const [viewport, path, fontLoaded] = await Promise.all([
+      page.viewportSize(),
+      page.evaluate(() => location.pathname + location.search),
+      page.evaluate(() => {
+        try {
+          return document.fonts.check('italic 16px "Instrument Serif"');
+        } catch {
+          return false;
+        }
+      }),
+    ]);
+    const shot = join(dir, `${state}.${project}.png`);
+    await page.screenshot({ path: shot, fullPage: false, scale: "css" });
+    writeFileSync(
+      join(dir, `${state}.${project}.meta.json`),
+      JSON.stringify({
+        runId, state, project, viewport, path, fontLoaded,
+        capturedAt: new Date().toISOString(),
+      }, null, 2)
+    );
+  } catch (e) {
+    console.warn(`${state}: shot capture failed — ${String(e)}`);
+  }
+}
+
 /* ---------- axe state scan ---------- */
 
 export interface AxeStateResult {
@@ -361,6 +406,7 @@ function slim(violations: Array<{ id: string; impact?: string | null; nodes: Arr
 }
 
 export async function scanState(page: Page, state: string): Promise<AxeStateResult> {
+  await captureShot(page, state);
   const tagged = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze();
   const full = await new AxeBuilder({ page }).analyze();
   const project = test.info().project.name.replace(/[^a-z0-9-]+/gi, "-");
