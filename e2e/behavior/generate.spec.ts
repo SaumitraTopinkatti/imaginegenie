@@ -95,6 +95,39 @@ test("huge payload does not hang the UI", async ({ app }) => {
   await expect(app.locator("#gallery .card")).toHaveCount(1, { timeout: 30000 });
 });
 
+test("hero loader stays square across mid-run shape change", async ({ app }) => {
+  test.skip(test.info().project.name === "mobile", "mobile composer sheet covers the hero mid-run");
+  // Empty library: a lone slot renders the hero path.
+  const m = marker("hero");
+  await fillKey(app, "sk-or-test-ok");
+  await ensureComposerOpen(app);
+  await app.getByRole("button", { name: "Aspect ratio 16:9" }).click();
+  await generate(app, `hero square ${m} [[mock:delay,ms=4000]]`);
+  const frame = app.locator(".gallery-hero .denoise-frame");
+  await expect(frame).toBeVisible({ timeout: 8000 });
+  const first = await frame.boundingBox();
+  expect(first).not.toBeNull();
+  expect(first!.width / first!.height).toBeGreaterThan(0.95);
+  expect(first!.width / first!.height).toBeLessThan(1.05);
+  await ensureComposerOpen(app);
+  await app.getByRole("button", { name: "Aspect ratio 9:16" }).click();
+  const second = await frame.boundingBox();
+  expect(second).not.toBeNull();
+  expect(Math.abs(second!.width - first!.width)).toBeLessThan(2);
+  expect(Math.abs(second!.height - first!.height)).toBeLessThan(2);
+  // Caption shows the run's shape, not the live picker.
+  await expect(app.locator(".gallery-hero .gen-meta").first()).toContainText("16:9");
+  const stage = app.locator(".gallery-hero .hero-stage");
+  await expect(stage).toBeVisible({ timeout: 20000 });
+  const revealed = await stage.boundingBox();
+  expect(revealed).not.toBeNull();
+  expect(Math.abs(revealed!.width - first!.width)).toBeLessThan(2);
+  expect(Math.abs(revealed!.height - first!.height)).toBeLessThan(2);
+  const reqs = await loggedWithPrompt(m);
+  expect(reqs).toHaveLength(1);
+  expect((reqs[0].body as Record<string, unknown>).aspect_ratio).toBe("16:9");
+});
+
 test("reveal: square loader, same grid position, no jump", async ({ app }) => {
   // A seeded record forces the grid layout (a lone slot renders the hero).
   await seedLibrary(app, { records: [{ prompt: "Grid anchor" }] });

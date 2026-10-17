@@ -115,6 +115,8 @@ interface Slot {
   gen: Generation | null;
   revealing: boolean;
   epoch: number;
+  /** Caption snapshotted at run start so mid-run picker changes never rewrite it. */
+  label: string;
 }
 
 function clampCount(n: number): number {
@@ -152,10 +154,6 @@ function gridDims(label: string): { cols: number; rows: number } {
     : { cols: Math.max(4, Math.round(long * rt)), rows: long };
 }
 
-function aspectCss(label: string): string {
-  if (label === "auto") return "1 / 1";
-  return label.split(":").join(" / ");
-}
 const PRICE_1K = 0.045;
 const PRICE_2K = 0.09;
 const TABS: Array<{ id: TabId; label: string; Icon: (props: { size?: number }) => JSX.Element }> = [
@@ -868,6 +866,7 @@ export default function App() {
           gen: null as Generation | null,
           revealing: false,
           epoch,
+          label: `${aspect} · ${resolution}`,
         };
       });
       setSlots((prev) => [...prev, ...batch]);
@@ -1452,11 +1451,9 @@ export default function App() {
     () => ASPECT_RATIOS.filter((a) => caps.aspects.includes(a) && !caps.mainAspects.includes(a)),
     [caps]
   );
-  const loaderDims = gridDims(aspect);
-  const loaderAspect = aspectCss(aspect);
-  /* Grid result thumbs are fixed squares (.card .thumb aspect-ratio: 1), so the
-   * grid loader frame is square too — otherwise a 16:9 pick renders short and
-   * the card jumps size on reveal. The solo hero keeps the picked ratio. */
+  /* Studio loaders are always 1:1 — grid result thumbs are fixed squares
+   * (.card .thumb aspect-ratio: 1) and the solo hero reuses the same square
+   * frame, so mid-run shape changes never resize or restart the animation. */
   const slotDims = gridDims("1:1");
 
   /** One shared card per slot: loader first, then the staggered reveal of its
@@ -1489,9 +1486,7 @@ export default function App() {
         <div className="body">
           <div className={generating ? "gen-caption" : "gen-caption fading"}>
             <span className="gen-status">Generating · {genElapsed}s</span>
-            <span className="gen-meta">
-              {aspect} · {resolution}
-            </span>
+            <span className="gen-meta">{s.label}</span>
           </div>
         </div>
       </div>
@@ -2165,7 +2160,7 @@ export default function App() {
             ) : slots.length > 0 && generations.length === 0 && slots.length === 1 ? (
               <div className="panel gallery-hero" key={`hero-${slots[0].key}`}>
                 {slots[0].gen && slots[0].revealing ? (
-                  <div className="reveal">
+                  <div className="reveal hero-stage">
                     <img
                       className="r-img hero-img"
                       src={slots[0].gen.thumbUrl}
@@ -2182,17 +2177,15 @@ export default function App() {
                   <>
                     <DenoiseFrame
                       seed={slots[0].key}
-                      cols={loaderDims.cols}
-                      rows={loaderDims.rows}
-                      aspect={loaderAspect}
+                      cols={slotDims.cols}
+                      rows={slotDims.rows}
+                      aspect="1 / 1"
                       done={!generating}
                       onClean={() => slotCleaned(slots[0].key)}
                     />
                     <div className={generating ? "gen-caption" : "gen-caption fading"}>
                       <span className="gen-status">Generating · {genElapsed}s</span>
-                      <span className="gen-meta">
-                        {aspect} · {resolution}
-                      </span>
+                      <span className="gen-meta">{slots[0].label}</span>
                     </div>
                   </>
                 )}

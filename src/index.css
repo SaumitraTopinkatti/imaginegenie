@@ -507,6 +507,10 @@ select {
 .gen-status { font-family: var(--font-mono); font-size: 12px; color: var(--teal-dark); font-variant-numeric: tabular-nums; }
 .gen-meta { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
 .hero-img { width: 100%; border-radius: 10px; display: block; }
+/* hero reveal stage: same square box as the loader so loader -> image never
+ * resizes the panel; the image letterboxes inside via object-fit: contain. */
+.hero-stage { width: 100%; aspect-ratio: 1 / 1; border-radius: 10px; background: var(--surface-2); border: 1.5px solid transparent; box-sizing: border-box; overflow: hidden; }
+.hero-stage .hero-img { height: 100%; object-fit: contain; }
 
 /* staggered reveal: image -> prompt -> chips -> timestamp/controls */
 .reveal .r-img { animation: rFade 0.5s ease both; }
