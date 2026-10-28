@@ -293,7 +293,8 @@ test("entry points: lightbox, viewer and references segment", async ({ app }) =>
   });
   await app.reload();
   await app.getByRole("button", { name: /^Open image 1:/ }).click();
-  await app.getByRole("dialog", { name: "Generation details" }).getByRole("button", { name: "Inpaint", exact: true }).click();
+  // Scope to .lb-body: the mobile .lb-dock (sibling, outside the body) has its own Inpaint button.
+  await app.getByRole("dialog", { name: "Generation details" }).locator(".lb-body").getByRole("button", { name: "Inpaint", exact: true }).click();
   await expect(app.locator("#inpaint-main")).toBeFocused();
   await expect(app.locator(".mask-overlay")).toBeVisible({ timeout: 8000 });
   // Viewer entry.
