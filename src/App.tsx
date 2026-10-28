@@ -66,10 +66,14 @@ import {
   HistoryIcon,
   KeyIcon,
   LockIcon,
+  MonitorIcon,
+  MoonIcon,
   SearchIcon,
   SparkIcon,
+  SunIcon,
   UploadIcon,
 } from "./components/icons";
+import { NEXT_THEME, cycleThemePref, useThemePref, type ThemePref } from "./lib/theme";
 import ReferencesTab from "./components/ReferencesTab";
 import InpaintTab from "./components/InpaintTab";
 import type { Generation, InpaintSource } from "./lib/types";
@@ -294,7 +298,17 @@ function GenCard({ g, index, reveal = false, onOpen, onRetry, onCopy, onDownload
   );
 }
 
+const THEME_NAME: Record<ThemePref, string> = { system: "System", light: "Light", dark: "Dark" };
+const THEME_ICON: Record<ThemePref, typeof MonitorIcon> = {
+  system: MonitorIcon,
+  light: SunIcon,
+  dark: MoonIcon,
+};
+
 export default function App() {
+  const themePref = useThemePref();
+  const ThemeGlyph = THEME_ICON[themePref];
+  const themeLabel = `Theme: ${THEME_NAME[themePref]}. Switch to ${THEME_NAME[NEXT_THEME[themePref]]}`;
   /* ----- api key ----- */
   const [apiKey, setApiKey] = useState<string>(() => loadKey());
   const [rememberKey, setRememberKey] = useState(false);
@@ -1566,6 +1580,15 @@ export default function App() {
               <span className="key-mask" aria-hidden="true">{apiKey.trim() ? maskKey(apiKey.trim()) : rememberKey ? "••••••" : "no key"}</span>
               <span className="key-state">{!apiKey.trim() && !rememberKey ? "Not set" : keyMsg.kind === "err" ? "Check key" : "Connected"}</span>
             </button>
+            <button
+              type="button"
+              className="theme-btn"
+              aria-label={themeLabel}
+              title={themeLabel}
+              onClick={() => cycleThemePref()}
+            >
+              <ThemeGlyph size={17} />
+            </button>
           </div>
         </div>
       </header>
@@ -1632,6 +1655,20 @@ export default function App() {
             )}
           </a>
         ))}
+        {/* <=460px only: the header theme-btn is hidden there (keeps the wrapped
+            header at its pre-theme layout). Same control, same cycle. */}
+        <div className="drawer-theme">
+          <button
+            type="button"
+            className="drawer-theme-btn"
+            aria-label={themeLabel}
+            onClick={() => cycleThemePref()}
+            tabIndex={navOpen ? 0 : -1}
+          >
+            <ThemeGlyph size={16} />
+            <span>{`Theme: ${THEME_NAME[themePref]}`}</span>
+          </button>
+        </div>
       </nav>
 
       {tab === "studio" && (
@@ -1736,8 +1773,8 @@ export default function App() {
                         style={{
                           width: box.w,
                           height: box.h,
-                          border: `1.5px ${box.dashed ? "dashed" : "solid"} ${sel ? "#0A7A6B" : "#8E9895"}`,
-                          background: sel ? "#E1F1ED" : "transparent",
+                          border: `1.5px ${box.dashed ? "dashed" : "solid"} ${sel ? "var(--accent)" : "var(--box-idle)"}`,
+                          background: sel ? "var(--teal-soft)" : "transparent",
                         }}
                       />
                       <span className="lbl">{a}</span>
@@ -2087,7 +2124,7 @@ export default function App() {
                   onClick={() => setLibMenuOpen((o) => !o)}
                 >
                   Library
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5D6966" strokeWidth="2" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+                  <svg className="btn-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
                 </button>
                 {libMenuOpen && (
                   <div

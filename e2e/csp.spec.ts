@@ -21,6 +21,20 @@ test("deep links serve index.html with production headers", async ({ page }) => 
   await expect(page.getByRole("heading", { name: /Inpaint/ })).toBeVisible();
 });
 
+test("theme boot script (public/theme-init.js) runs under enforced CSP", async ({ page }) => {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __cspViolations: string[] };
+    w.__cspViolations = [];
+    document.addEventListener("securitypolicyviolation", (e) => {
+      w.__cspViolations.push(`${e.violatedDirective} ${e.blockedURI}`);
+    });
+  });
+  await page.goto("/");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", /^(light|dark)$/);
+  const violations = await page.evaluate(() => (window as unknown as { __cspViolations: string[] }).__cspViolations);
+  expect(violations).toEqual([]);
+});
+
 test("loopback API is blocked by connect-src (documents the split)", async ({ page }) => {
   await page.goto("/");
   const blocked = await page.evaluate(async () => {

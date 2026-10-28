@@ -86,7 +86,12 @@ Ports (env-overridable): app 4190 (`E2E_APP_PORT`), mock API 4191
 - `unit/inpaint-prompt.spec.ts` — pure prompt/aspect/cost contract, no `app`
   fixture, desktop only.
 - `real-store.spec.ts` — prod `dist/` smoke (no hook, boots, XOR-row decrypt).
-- `csp.spec.ts` — header parity on `dist-e2e` under production headers.
+- `behavior/theme.spec.ts` — System/Light/Dark toggle + persistence (header at
+  >460px, drawer foot at ≤460px; one control per viewport), live OS follow,
+  invalid/blocked storage fallback, `data-theme` set before the app
+  bundle runs (bundle route-held; fails if `theme-init.js` is dropped).
+- `csp.spec.ts` — header parity on `dist-e2e` under production headers;
+  `theme-init.js` runs with zero CSP violations.
 
 ## Add a state
 

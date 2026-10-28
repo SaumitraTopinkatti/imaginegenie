@@ -44,7 +44,11 @@ function smooth(a: number): number {
   return c * c * (3 - 2 * c);
 }
 
+// Fallback only: the live colour is the --pixel token (light/dark), read per frame.
 const PX = "#13A08C";
+function pixelColor(): string {
+  return getComputedStyle(document.documentElement).getPropertyValue("--pixel").trim() || PX;
+}
 const AMP = 0.7;
 const DRIFT = 0.55;
 
@@ -99,7 +103,7 @@ export default function DenoiseFrame({
       const ch = h / rows;
       const drift = reduceMotion() ? 0 : DRIFT;
       ctx.clearRect(0, 0, w, h);
-      ctx.fillStyle = PX;
+      ctx.fillStyle = pixelColor();
       for (let j = 0; j < rows; j++) {
         for (let i = 0; i < cols; i++) {
           const th = hash(i, j, seed);
