@@ -3,6 +3,10 @@
   - paragraph: Paint what to change in red, describe it, generate. Everything outside the paint stays as it is.
   - text: Source image
   - button "Choose image"
+  - group "Reference images (optional)":
+    - text: /Reference images \(optional\) 0 \/ \d+/
+    - button "Drop or browse images PNG, JPG or WebP · resized to 2048px max"
+    - button "From library"
   - text: /Instruction 0\/\d+/
   - textbox "Inpaint instruction":
     - /placeholder: Replace this with a shiny basketball

@@ -21,6 +21,24 @@ function refsOf(r: MockRequest): Array<{ url: string }> {
   return (body.input_references ?? []).map((e) => ({ url: e.image_url?.url ?? "" }));
 }
 
+/** Extra-reference upload: the section's own file input (hidden, always mounted). */
+const extraInput = (app: Page) => app.locator('#inpaint-main input[type="file"]');
+function pngFile(w: number, h: number, kind: "solid" | "gradient", name = "extra.png") {
+  return { name, mimeType: "image/png", buffer: Buffer.from(pngDataUrl(w, h, kind).split(",")[1], "base64") };
+}
+async function decodedDims(app: Page, urls: string[]) {
+  return app.evaluate(async (list: string[]) => {
+    const sizes: number[][] = [];
+    for (const u of list) {
+      const img = new Image();
+      img.src = u;
+      await img.decode();
+      sizes.push([img.naturalWidth, img.naturalHeight]);
+    }
+    return sizes;
+  }, urls);
+}
+
 test("default flow sends [original, marked] with the wrapped prompt", async ({ app }) => {
   const m = marker("inpaint-default");
   await seedLibrary(app, { records: [{ prompt: "Source scene", imageUrl: pngDataUrl(192, 128, "solid") }] });
@@ -337,4 +355,133 @@ test("backup round trip keeps inpaint metadata", async ({ app }) => {
   await expect(app.locator("#gallery .card")).toHaveCount(2, { timeout: 10000 });
   await expect(app.getByText(`backup lady ${m}`).first()).toBeVisible();
   await expect(app.locator("#gallery").getByText("Inpaint", { exact: true }).first()).toBeVisible();
+});
+
+/* ---------- optional extra references (Seedream) ---------- */
+
+async function paintedInpaint(app: Page, records: Array<{ prompt: string; imageUrl: string }>) {
+  await seedLibrary(app, { records });
+  await app.reload();
+  await fillKey(app, "sk-or-test-ok");
+  await gotoTab(app, "inpaint");
+  await pickFirstGeneration(app);
+  await paintStroke(app, { x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 });
+  await ensureInpaintControlsOpen(app);
+}
+
+test("uploaded extra refs follow the base images: order, prompt, cost", async ({ app }) => {
+  const m = marker("inpaint-extra");
+  await paintedInpaint(app, [{ prompt: "Extra source", imageUrl: pngDataUrl(192, 128, "solid") }]);
+  await extraInput(app).setInputFiles([pngFile(40, 40, "gradient", "a.png"), pngFile(40, 40, "solid", "b.png")]);
+  await expect(app.getByText("2 / 12", { exact: true })).toBeVisible();
+  await expect(app.getByRole("button", { name: "Remove reference 2" })).toBeVisible();
+  await app.getByRole("textbox", { name: "Inpaint instruction" }).fill(`extra two ${m}`);
+  // 1K: 0.045 + 4 refs x 0.003 = 0.057.
+  await expect(app.getByRole("button", { name: /Generate · \$0\.057/ })).toBeVisible();
+  await app.getByRole("button", { name: /Generate ·/ }).click();
+  await expect(app.locator(".inpaint-result-img")).toBeVisible({ timeout: 20000 });
+  const reqs = await loggedWithPrompt(m);
+  expect(reqs).toHaveLength(1);
+  expect((reqs[0].body as { prompt: string }).prompt).toContain("The last 2 attached images are extra references");
+  const refs = refsOf(reqs[0]);
+  expect(refs).toHaveLength(4);
+  // Base pair share the source grid; the extras keep their own upload size, in order.
+  const dims = await decodedDims(app, refs.map((r) => r.url));
+  expect(dims[0]).toEqual(dims[1]);
+  expect(dims[0]).not.toEqual([40, 40]);
+  expect(dims[2]).toEqual([40, 40]);
+  expect(dims[3]).toEqual([40, 40]);
+});
+
+test("knob off with one extra sends [marked, extra]", async ({ app }) => {
+  const m = marker("inpaint-extra-knob");
+  await paintedInpaint(app, [{ prompt: "Extra knob source", imageUrl: pngDataUrl(128, 128, "solid") }]);
+  await extraInput(app).setInputFiles([pngFile(48, 48, "gradient")]);
+  await app.getByRole("textbox", { name: "Inpaint instruction" }).fill(`remove it ${m}`);
+  await app.getByText("Advanced").click();
+  await app.getByText("Send original as reference").click();
+  // 1K: 0.045 + 2 refs x 0.003 = 0.051.
+  await expect(app.getByRole("button", { name: /Generate · \$0\.051/ })).toBeVisible();
+  await app.getByRole("button", { name: /Generate ·/ }).click();
+  await expect(app.locator(".inpaint-result-img")).toBeVisible({ timeout: 20000 });
+  const reqs = await loggedWithPrompt(m);
+  expect(reqs).toHaveLength(1);
+  expect(refsOf(reqs[0])).toHaveLength(2);
+  const prompt = (reqs[0].body as { prompt: string }).prompt;
+  expect(prompt).toContain("One image is attached");
+  expect(prompt).toContain("The last attached image is an extra reference");
+});
+
+test("library refs: multi-select adds the picks in one step", async ({ app }) => {
+  const m = marker("inpaint-extra-lib");
+  await seedLibrary(app, {
+    records: [{ prompt: "Lib source", imageUrl: pngDataUrl(128, 128, "solid") }],
+    references: [
+      { name: "Lib one", imageUrl: pngDataUrl(64, 64, "gradient") },
+      { name: "Lib two", imageUrl: pngDataUrl(64, 64, "solid") },
+    ],
+  });
+  await app.reload();
+  await fillKey(app, "sk-or-test-ok");
+  await gotoTab(app, "inpaint");
+  await pickFirstGeneration(app);
+  await paintStroke(app, { x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 });
+  await ensureInpaintControlsOpen(app);
+  await app.getByRole("button", { name: "From library" }).click();
+  const dlg = app.getByRole("dialog", { name: "Add reference images" });
+  await expect(dlg).toBeVisible();
+  await dlg.getByRole("button", { name: "Select reference Lib one" }).click();
+  await dlg.getByRole("button", { name: "Select reference Lib two" }).click();
+  await expect(dlg.getByRole("button", { name: "Select reference Lib two" })).toHaveAttribute("aria-pressed", "true");
+  await dlg.getByRole("button", { name: "Add 2 references" }).click();
+  await expect(dlg).toBeHidden();
+  await expect(app.getByText("2 / 12", { exact: true })).toBeVisible();
+  await app.getByRole("textbox", { name: "Inpaint instruction" }).fill(`library pick ${m}`);
+  await app.getByRole("button", { name: /Generate ·/ }).click();
+  await expect(app.locator(".inpaint-result-img")).toBeVisible({ timeout: 20000 });
+  const reqs = await loggedWithPrompt(m);
+  expect(reqs).toHaveLength(1);
+  expect(refsOf(reqs[0])).toHaveLength(4);
+  expect((reqs[0].body as { prompt: string }).prompt).toContain("The last 2 attached images are extra references");
+});
+
+test("extra cap: over-limit upload refused, remove frees a slot", async ({ app }) => {
+  await paintedInpaint(app, [{ prompt: "Cap source", imageUrl: pngDataUrl(128, 128, "solid") }]);
+  const thirteen = Array.from({ length: 13 }, (_, i) => pngFile(24, 24, "solid", `r${i}.png`));
+  await extraInput(app).setInputFiles(thirteen);
+  await expect(app.getByText("Limit is 12 extra references (14 total)", { exact: false })).toBeVisible();
+  await expect(app.getByText("0 / 12", { exact: true })).toBeVisible();
+  await extraInput(app).setInputFiles(thirteen.slice(0, 2));
+  await expect(app.getByText("2 / 12", { exact: true })).toBeVisible();
+  await app.getByRole("button", { name: "Remove reference 1" }).click();
+  await expect(app.getByText("1 / 12", { exact: true })).toBeVisible();
+  await expect(app.getByRole("button", { name: "Remove reference 2" })).toBeHidden();
+});
+
+test("knob on with 13 extras: blocked before any request", async ({ app }) => {
+  const m = marker("inpaint-extra-cap");
+  await paintedInpaint(app, [{ prompt: "Over cap source", imageUrl: pngDataUrl(128, 128, "solid") }]);
+  // Knob off leaves 13 slots; turning it back on makes 2 + 13 = 15 > 14.
+  await app.getByText("Advanced").click();
+  await app.getByText("Send original as reference").click();
+  await extraInput(app).setInputFiles(Array.from({ length: 13 }, (_, i) => pngFile(24, 24, "solid", `c${i}.png`)));
+  await expect(app.getByText("13 / 13", { exact: true })).toBeVisible();
+  await app.getByText("Send original as reference").click();
+  await expect(app.getByText("13 / 12 · remove 1", { exact: true })).toBeVisible();
+  await app.getByRole("textbox", { name: "Inpaint instruction" }).fill(`over cap ${m}`);
+  await app.getByRole("button", { name: /Generate ·/ }).click();
+  await expect(app.locator("#inpaint-error")).toContainText("remove 1");
+  await expect(app.locator("#inpaint-error")).toContainText("No request was sent");
+  expect(await loggedWithPrompt(m)).toEqual([]);
+});
+
+test("extra refs survive a tab switch", async ({ app }) => {
+  await paintedInpaint(app, [{ prompt: "Switch source", imageUrl: pngDataUrl(128, 128, "solid") }]);
+  await extraInput(app).setInputFiles([pngFile(32, 32, "gradient")]);
+  await expect(app.getByText("1 / 12", { exact: true })).toBeVisible();
+  await gotoTab(app, "studio");
+  await gotoTab(app, "inpaint");
+  await ensureInpaintControlsOpen(app);
+  await expect(app.getByText("1 / 12", { exact: true })).toBeVisible();
+  await expect(app.getByRole("button", { name: "Remove reference 1" })).toBeVisible();
 });

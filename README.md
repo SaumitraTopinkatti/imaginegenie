@@ -11,7 +11,7 @@ Features:
 - Composer with model picker, prompt, aspect ratio, resolution, and reference image inputs
 - Gallery with filters and cost tracking
 - References library tab for reusable reference images
-- Inpaint tab: pick a generation or reference, paint a red mask, describe the change ("replace this with a basketball") — the model edits only inside the mask and the unpainted area stays pixel-exact
+- Inpaint tab: pick a generation or reference, paint a red mask, describe the change ("replace this with a basketball") — the model edits only inside the mask and the unpainted area stays pixel-exact; optional extra reference images (upload or from the library, Seedream only) guide the edit
 - Lightbox view for generated images
 - Encrypted IndexedDB store for generations and settings (key held in memory)
 - API-key modal with a truthful Test (checks `GET /key`, shows the key label + remaining limit) and paste-tolerant input (`Bearer ` prefix, quotes, and stray whitespace are cleaned automatically)

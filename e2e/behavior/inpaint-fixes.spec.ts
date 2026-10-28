@@ -107,8 +107,8 @@ test("wheel over Size steps the value without scrolling; preview shows and fades
   await pickFirstGeneration(app);
   const slider = app.getByRole("slider", { name: /Brush size/ });
   const before = Number(await slider.getAttribute("value"));
-  const scrollYBefore = await app.evaluate(() => window.scrollY);
   await slider.hover();
+  const scrollYBefore = await app.evaluate(() => window.scrollY);
   await app.mouse.wheel(0, -240);
   const after = Number(await slider.getAttribute("value"));
   expect(after).toBeGreaterThan(before);

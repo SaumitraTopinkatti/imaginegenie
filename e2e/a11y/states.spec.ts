@@ -399,6 +399,22 @@ test("inpaint-result", async ({ app }) => {
   await scanState(app, "inpaint-result");
 });
 
+test("inpaint-refs", async ({ app }) => {
+  skipUnlessEmu("inpaint-refs");
+  await seedLibrary(app, { records: [{ prompt: "Refs state source" }] });
+  await app.reload();
+  await gotoTab(app, "inpaint");
+  await pickFirstGeneration(app);
+  await ensureInpaintControlsOpen(app);
+  await app.locator('#inpaint-main input[type="file"]').setInputFiles({
+    name: "ref.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(pngDataUrl(64, 64, "solid").split(",")[1], "base64"),
+  });
+  await expect(app.getByRole("button", { name: "Remove reference 1" })).toBeVisible();
+  await scanState(app, "inpaint-refs");
+});
+
 test("mobile-sheet-open", async ({ app }) => {
   test.skip(test.info().project.name !== "mobile", "mobile sheet only");
   await app.getByRole("button", { name: /tap to expand/i }).click();

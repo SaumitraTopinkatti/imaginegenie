@@ -5,7 +5,7 @@ import DenoiseFrame from "./DenoiseFrame";
 import type { Generation, InpaintSource } from "../lib/types";
 import { generateImage, type Resolution } from "../lib/openrouter";
 import { MODELS } from "../lib/models";
-import { b64ToDataUrl, copyImageDataUrl, downloadDataUrl } from "../lib/images";
+import { b64ToDataUrl, copyImageDataUrl, downloadDataUrl, fileToDataUrl, isAccepted } from "../lib/images";
 import { saveGeneration } from "../lib/library";
 import { inpaintSrcParam } from "../lib/route";
 import { replaceUrl } from "../lib/historyLayers";
@@ -16,7 +16,7 @@ import {
   inpaintCost,
   nearestAspect,
 } from "../lib/inpaint";
-import { BrushIcon, CloseIcon, CopyIcon, DownloadIcon, GalleryIcon } from "./icons";
+import { BrushIcon, CloseIcon, CopyIcon, DownloadIcon, GalleryIcon, UploadIcon } from "./icons";
 import { SHEET_MQ, useBottomSheet } from "../lib/useBottomSheet";
 
 export interface InpaintTabProps {
@@ -52,6 +52,12 @@ interface InpaintResult {
   beforeUrl: string;
 }
 
+/** Optional user reference (upload or library), sent after the base images. */
+interface ExtraRef {
+  id: string;
+  url: string;
+}
+
 export default function InpaintTab({
   hidden,
   generations,
@@ -66,9 +72,19 @@ export default function InpaintTab({
 }: InpaintTabProps) {
   const [source, setSource] = useState<InpaintSource | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [refPickerOpen, setRefPickerOpen] = useState(false);
+  /** Extra references: kept across tab switches; cleared only by their remove buttons. */
+  const [extraRefs, setExtraRefs] = useState<ExtraRef[]>([]);
+  const [extraDragOver, setExtraDragOver] = useState(false);
+  const extraSeq = useRef(0);
+  const extraFileInput = useRef<HTMLInputElement>(null);
   const [instruction, setInstruction] = useState("");
   const [resolution, setResolution] = useState<Resolution>("1K");
   const [includeOriginal, setIncludeOriginal] = useState(true);
+  // Seedream ref cap: base images (2 with the knob on, else 1) + extras <= maxRefs.
+  const maxRefs = MODELS.seedream.maxRefs;
+  const baseRefCount = includeOriginal ? 2 : 1;
+  const extraCap = maxRefs - baseRefCount;
   const [pixelExact, setPixelExact] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [showLoader, setShowLoader] = useState(false);
@@ -126,6 +142,7 @@ export default function InpaintTab({
   useEffect(() => {
     if (!hidden) return;
     setPickerOpen(false);
+    setRefPickerOpen(false);
     setSheetOpen(false);
     setDialogReset((k) => k + 1);
   }, [hidden]);
@@ -175,6 +192,33 @@ export default function InpaintTab({
     };
   }, [generating]);
 
+  const addExtra = (urls: string[]) =>
+    setExtraRefs((cur) =>
+      [...cur, ...urls.map((url) => ({ id: `x${Date.now().toString(36)}-${extraSeq.current++}`, url }))].slice(
+        0,
+        extraCap
+      )
+    );
+  const removeExtra = (id: string) => setExtraRefs((cur) => cur.filter((r) => r.id !== id));
+
+  const addExtraFiles = async (files: FileList | File[]) => {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+    if (list.length > extraCap - extraRefs.length) {
+      pushToast("err", `Limit is ${extraCap} extra references (${maxRefs} total). Remove some first.`);
+      return;
+    }
+    if (list.some((f) => !isAccepted(f))) {
+      pushToast("err", "Only PNG, JPG or WebP files.");
+      return;
+    }
+    try {
+      addExtra(await Promise.all(list.map((f) => fileToDataUrl(f))));
+    } catch (e) {
+      pushToast("err", e instanceof Error ? e.message : "Could not read images.");
+    }
+  };
+
   const doInpaint = useCallback(async () => {
     if (lockRef.current) return;
     lockRef.current = true;
@@ -191,6 +235,13 @@ export default function InpaintTab({
       const trimmed = instruction.trim();
       if (!trimmed) {
         setError("Describe the change first.");
+        return;
+      }
+      // Toggling the knob on can push extras over the cap: block before any POST.
+      if (extraRefs.length > extraCap) {
+        setError(
+          `Seedream takes up to ${maxRefs} references in total — remove ${extraRefs.length - extraCap}. No request was sent.`
+        );
         return;
       }
       const key = await resolveKey();
@@ -226,8 +277,9 @@ export default function InpaintTab({
       abortRef.current = ctrl;
       try {
         const { original, marked, width, height } = await editor.exportImages();
-        const prompt = buildInpaintPrompt({ instruction: trimmed, includeOriginal });
-        const refs = includeOriginal ? [original, marked] : [marked];
+        const extraUrls = extraRefs.map((r) => r.url);
+        const prompt = buildInpaintPrompt({ instruction: trimmed, includeOriginal, extraRefs: extraUrls.length });
+        const refs = [...(includeOriginal ? [original, marked] : [marked]), ...extraUrls];
         const aspect = nearestAspect(width, height).ratio;
         const res = await generateImage(
           key,
@@ -265,6 +317,7 @@ export default function InpaintTab({
               sourceId: source.id,
               includedOriginal: includeOriginal,
               composited,
+              extraRefs: extraUrls.length,
             },
           });
           onSaved(gen);
@@ -295,7 +348,7 @@ export default function InpaintTab({
     } finally {
       lockRef.current = false;
     }
-  }, [generating, source, maskOk, instruction, resolveKey, degraded, includeOriginal, pixelExact, resolution, onSaved, pushToast]);
+  }, [generating, source, maskOk, instruction, resolveKey, degraded, includeOriginal, extraRefs, pixelExact, resolution, onSaved, pushToast]);
 
   const cancel = () => abortRef.current?.abort();
 
@@ -307,10 +360,16 @@ export default function InpaintTab({
   };
 
   const aspectInfo = sourceDims ? nearestAspect(sourceDims.w, sourceDims.h) : null;
-  const est = inpaintCost(resolution, includeOriginal ? 2 : 1);
+  const est = inpaintCost(resolution, baseRefCount + extraRefs.length);
+  const refsLabel =
+    extraRefs.length === 0
+      ? baseRefCount === 2
+        ? "2 refs"
+        : "1 ref"
+      : `${baseRefCount} + ${extraRefs.length} refs`;
   const promptPreview =
     instruction.trim() !== ""
-      ? buildInpaintPrompt({ instruction: instruction.trim(), includeOriginal })
+      ? buildInpaintPrompt({ instruction: instruction.trim(), includeOriginal, extraRefs: extraRefs.length })
       : "";
   const loaderAspect =
     sourceDims && sourceDims.h > 0 ? `${sourceDims.w} / ${sourceDims.h}` : "1 / 1";
@@ -411,6 +470,79 @@ export default function InpaintTab({
                   </button>
                 )}
               </div>
+              <div className="field" role="group" aria-labelledby="inpaint-refs-label">
+                <div className="field-label">
+                  <span id="inpaint-refs-label">Reference images (optional)</span>
+                  <span className="count">
+                    {extraRefs.length > extraCap
+                      ? `${extraRefs.length} / ${extraCap} · remove ${extraRefs.length - extraCap}`
+                      : `${extraRefs.length} / ${extraCap}`}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className={extraDragOver ? "dropzone over" : "dropzone"}
+                  onClick={() => extraFileInput.current?.click()}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setExtraDragOver(true);
+                  }}
+                  onDragLeave={() => setExtraDragOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setExtraDragOver(false);
+                    void addExtraFiles(e.dataTransfer.files);
+                  }}
+                >
+                  <span className="dz-ico" aria-hidden="true">
+                    <UploadIcon size={16} />
+                  </span>
+                  <span>
+                    <span className="dz-title">Drop or browse images</span>
+                    <span className="dz-sub">PNG, JPG or WebP · resized to 2048px max</span>
+                  </span>
+                </button>
+                <input
+                  ref={extraFileInput}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  multiple
+                  hidden
+                  onChange={(e) => {
+                    if (e.target.files) void addExtraFiles(e.target.files);
+                    e.target.value = "";
+                  }}
+                />
+                <div>
+                  <button
+                    type="button"
+                    className="lib-link"
+                    disabled={extraRefs.length >= extraCap}
+                    onClick={() => setRefPickerOpen(true)}
+                  >
+                    <GalleryIcon size={14} /> From library
+                  </button>
+                </div>
+                {extraRefs.length > 0 && (
+                  <div className="ref-grid">
+                    {extraRefs.map((r, i) => (
+                      <div className="ref-thumb" key={r.id}>
+                        <img src={r.url} alt={`Reference ${i + 1}`} />
+                        <span className="idx">#{i + 1}</span>
+                        <button
+                          type="button"
+                          className="rm"
+                          title="Remove"
+                          aria-label={`Remove reference ${i + 1}`}
+                          onClick={() => removeExtra(r.id)}
+                        >
+                          <CloseIcon size={11} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="field">
                 <div className="field-label">
                   <span>
@@ -470,8 +602,8 @@ export default function InpaintTab({
                   <span>
                     Send original as reference
                     <small>
-                      On: the model sees the clean image plus the red-marked copy (2 refs).
-                      Off: marked copy only (1 ref) — cheaper, but red already in the scene
+                      On: the model sees the clean image plus the red-marked copy (2 base refs).
+                      Off: marked copy only (1 base ref) — cheaper, but red already in the scene
                       (red car, sunset) turns ambiguous without the clean image.
                     </small>
                   </span>
@@ -569,7 +701,7 @@ export default function InpaintTab({
                       <div className="gen-caption">
                         <span className="gen-status">Generating · {elapsed}s</span>
                         <span className="gen-meta">
-                          {resolution} · {includeOriginal ? "2 refs" : "1 ref"}
+                          {resolution} · {refsLabel}
                         </span>
                       </div>
                     </div>
@@ -650,6 +782,21 @@ export default function InpaintTab({
           )}
         </section>
       </main>
+      {refPickerOpen && (
+        <SourcePicker
+          generations={generations}
+          pushToast={pushToast}
+          onPick={() => undefined}
+          onClose={() => setRefPickerOpen(false)}
+          multi={{
+            max: extraCap - extraRefs.length,
+            onPickMany: (urls) => {
+              setRefPickerOpen(false);
+              addExtra(urls);
+            },
+          }}
+        />
+      )}
       {pickerOpen && (
         <SourcePicker
           generations={generations}

@@ -314,7 +314,7 @@ select {
 }
 .dropzone:hover, .dropzone.over { border-color: var(--teal); background: var(--teal-pale); }
 .dropzone .dz-title, .dropzone .dz-sub { display: block; }
-.dropzone:hover, .dropzone.over { border-color: var(--teal); background: var(--teal-pale); }
+.dropzone:hover, .dropzone.over, .dropzone:active { border-color: var(--teal); background: var(--teal-pale); }
 .dropzone .dz-ico {
   width: 36px; height: 36px; flex: none; border-radius: 9px;
   background: var(--teal-soft); color: var(--teal-dark);
@@ -353,6 +353,7 @@ select {
 .lib-link-row .btn { width: 100%; }
 .lib-link { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; padding: 4px 6px; margin-left: -6px; border-radius: 6px; color: var(--teal-dark); font-size: 13px; font-weight: 500; }
 .lib-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.lib-link:disabled { opacity: 0.5; cursor: not-allowed; text-decoration: none; }
 .tab-count {
   font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
   border: 1px solid var(--line); border-radius: 999px; padding: 0 6px;
@@ -982,6 +983,8 @@ html {
 .picker-thumb:active { transform: scale(0.97); }
 .picker-thumb:disabled { cursor: default; opacity: 0.7; }
 .picker-thumb:focus-visible { outline: 2px solid var(--teal-dark); outline-offset: 2px; }
+.picker-thumb[aria-pressed="true"] { border-color: var(--teal-dark); box-shadow: inset 0 0 0 2px var(--teal-dark); }
+.picker-add { background: var(--teal-dark); border-color: var(--teal-dark); color: #fff; }
 @media (max-width: 560px) {
   .picker-card { width: 94vw; height: 90dvh; }
   .picker-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }

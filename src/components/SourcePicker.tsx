@@ -18,6 +18,11 @@ export interface SourcePickerProps {
   pushToast: (kind: "ok" | "err" | "info", text: string) => void;
   onPick: (source: InpaintSource) => void;
   onClose: () => void;
+  /**
+   * Multi-select reference mode (Inpaint extra refs): library references only,
+   * toggle thumbs, one confirm returns every pick. At most `max` selectable.
+   */
+  multi?: { max: number; onPickMany: (urls: string[]) => void };
 }
 
 type Segment = "generations" | "references";
@@ -26,11 +31,13 @@ function snippetOf(g: Generation): string {
   return g.inpaint?.instruction || g.prompt || "Generated image";
 }
 
-export default function SourcePicker({ generations, pushToast, onPick, onClose }: SourcePickerProps) {
-  const [segment, setSegment] = useState<Segment>("generations");
+export default function SourcePicker({ generations, pushToast, onPick, onClose, multi }: SourcePickerProps) {
+  const [segment, setSegment] = useState<Segment>(multi ? "references" : "generations");
   const [refs, setRefs] = useState<ReferenceThumb[] | null>(null);
   const [refsError, setRefsError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [picked, setPicked] = useState<ReferenceThumb[]>([]);
+  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,6 +64,21 @@ export default function SourcePicker({ generations, pushToast, onPick, onClose }
     } catch {
       pushToast("err", "Could not decrypt that reference.");
       setBusyId(null);
+    }
+  };
+
+  const togglePick = (r: ReferenceThumb) =>
+    setPicked((cur) => (cur.some((p) => p.id === r.id) ? cur.filter((p) => p.id !== r.id) : [...cur, r]));
+
+  const addPicked = async () => {
+    if (!multi || adding || picked.length === 0) return;
+    setAdding(true);
+    try {
+      const urls = await Promise.all(picked.map((r) => loadReferenceImage(r.id)));
+      multi.onPickMany(urls);
+    } catch {
+      pushToast("err", "Could not decrypt those references.");
+      setAdding(false);
     }
   };
 
@@ -96,6 +118,24 @@ export default function SourcePicker({ generations, pushToast, onPick, onClose }
       <div className="picker-grid">
         {(refs ?? []).map((r) => {
           const caption = r.name || "untitled";
+          if (multi) {
+            const on = picked.some((p) => p.id === r.id);
+            return (
+              <button
+                key={r.id}
+                type="button"
+                className="picker-thumb"
+                aria-label={`Select reference ${caption}`}
+                aria-pressed={on}
+                title={caption}
+                disabled={adding || (!on && picked.length >= multi.max)}
+                onClick={() => togglePick(r)}
+              >
+                <img src={r.thumbUrl} alt="" loading="lazy" />
+                <span className="picker-cap">{caption}</span>
+              </button>
+            );
+          }
           return (
             <button
               key={r.id}
@@ -116,36 +156,52 @@ export default function SourcePicker({ generations, pushToast, onPick, onClose }
     );
 
   return (
-    <Dialog label="Choose image" onClose={onClose} panelClassName="confirm-card picker-card">
+    <Dialog
+      label={multi ? "Add reference images" : "Choose image"}
+      onClose={onClose}
+      panelClassName="confirm-card picker-card"
+    >
       <div className="picker-head">
-        <h3>Choose image</h3>
+        <h3>{multi ? "Add reference images" : "Choose image"}</h3>
         <button type="button" className="icon-btn" aria-label="Close image picker" onClick={onClose}>
           <CloseIcon size={15} />
         </button>
       </div>
-      <div className="seg" role="group" aria-label="Image source">
-        <button
-          type="button"
-          className={segment === "generations" ? "active" : ""}
-          aria-pressed={segment === "generations"}
-          onClick={() => setSegment("generations")}
-        >
-          Generations · {generations.length}
-        </button>
-        <button
-          type="button"
-          className={segment === "references" ? "active" : ""}
-          aria-pressed={segment === "references"}
-          onClick={() => setSegment("references")}
-        >
-          References{refs !== null ? ` · ${refs.length}` : ""}
-        </button>
-      </div>
+      {!multi && (
+        <div className="seg" role="group" aria-label="Image source">
+          <button
+            type="button"
+            className={segment === "generations" ? "active" : ""}
+            aria-pressed={segment === "generations"}
+            onClick={() => setSegment("generations")}
+          >
+            Generations · {generations.length}
+          </button>
+          <button
+            type="button"
+            className={segment === "references" ? "active" : ""}
+            aria-pressed={segment === "references"}
+            onClick={() => setSegment("references")}
+          >
+            References{refs !== null ? ` · ${refs.length}` : ""}
+          </button>
+        </div>
+      )}
       <div className="picker-body">{body}</div>
       <div className="confirm-actions">
         <button type="button" className="btn btn-small" onClick={onClose}>
           Cancel
         </button>
+        {multi && (
+          <button
+            type="button"
+            className="btn btn-small picker-add"
+            disabled={picked.length === 0 || adding}
+            onClick={() => void addPicked()}
+          >
+            Add {picked.length} {picked.length === 1 ? "reference" : "references"}
+          </button>
+        )}
       </div>
     </Dialog>
   );

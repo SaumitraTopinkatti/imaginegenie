@@ -11,6 +11,8 @@ export interface InpaintMeta {
   includedOriginal: boolean;
   /** D8 pixel-preserving composite applied around the mask. */
   composited: boolean;
+  /** User reference images sent after the base images (absent/0 = none). */
+  extraRefs?: number;
 }
 
 export interface Generation {

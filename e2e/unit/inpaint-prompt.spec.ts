@@ -56,4 +56,32 @@ test("nearestAspect pins explicit ratios", () => {
 test("inpaintCost matches the studio pricing pattern", () => {
   expect(inpaintCost("1K", 2)).toBeCloseTo(0.051, 9);
   expect(inpaintCost("2K", 1)).toBeCloseTo(0.093, 9);
+  // Base 2 + 2 user refs: the count is simply the total sent.
+  expect(inpaintCost("1K", 4)).toBeCloseTo(0.057, 9);
+});
+
+test("zero extra refs leaves the prompt byte-identical", () => {
+  for (const includeOriginal of [true, false]) {
+    const base = buildInpaintPrompt({ instruction: "replace this with a basketball", includeOriginal });
+    expect(buildInpaintPrompt({ instruction: "replace this with a basketball", includeOriginal, extraRefs: 0 })).toBe(base);
+  }
+});
+
+test("extra refs: ordinal-safe wording for both variants, instruction stays last", () => {
+  const a = buildInpaintPrompt({ instruction: "replace this with a basketball", includeOriginal: true, extraRefs: 1 });
+  expect(a).toContain("The last attached image is an extra reference for the red area only");
+  expect(a).toMatch(/Two images/);
+  expect(a).toMatch(/User instruction: «replace this with a basketball»$/);
+  expect(a.length).toBeLessThan(1300);
+
+  const a2 = buildInpaintPrompt({ instruction: "replace this with a basketball", includeOriginal: true, extraRefs: 2 });
+  expect(a2).toContain("The last 2 attached images are extra references for the red area only");
+  expect(a2).toMatch(/User instruction: «replace this with a basketball»$/);
+
+  const b = buildInpaintPrompt({ instruction: "replace this with a basketball", includeOriginal: false, extraRefs: 2 });
+  expect(b).toContain("One image is attached");
+  expect(b).toContain("The last 2 attached images are extra references for the red area only");
+  expect(b).not.toMatch(/first|second/);
+  expect(b).toMatch(/User instruction: «replace this with a basketball»$/);
+  expect(b.length).toBeLessThan(1300);
 });

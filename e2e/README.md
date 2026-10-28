@@ -47,7 +47,7 @@ Ports (env-overridable): app 4190 (`E2E_APP_PORT`), mock API 4191
   the server is shared across parallel workers. Per-prompt counters keep
   `fail-nth` parallel-safe.
 - `mock-api/png.mjs` — deterministic PNG fixtures (zlib encoder, no binaries).
-- `a11y/states.spec.ts` — 35 states × projects; emulation runs a subset;
+- `a11y/states.spec.ts` — 36 states × projects; emulation runs a subset;
   ARIA snapshots (`__aria__/`) assert on desktop only (`inpaint-empty` skips
   mobile — its heading lives in the closed sheet; `inpaint-sheet-open` covers
   the mobile sheet instead).
@@ -65,8 +65,11 @@ Ports (env-overridable): app 4190 (`E2E_APP_PORT`), mock API 4191
   clean header, garbage-key 401 copy. Verified to fail with normalisation
   reverted.
 - `behavior/inpaint.spec.ts` — inpaint wrap + ref order (2 default, 1 with knob),
-  guards (zero requests), cancel, mid-flight tab switch, overlay tint uniformity,
-  pixel-exact composite pixels, entry points, undo/redo gating, backup survival.
+  extra refs (upload + library multi-select, order `[base…, extras…]`, prompt,
+  cost, 12-slot cap, over-cap knob toggle sends zero requests, tab-switch
+  survival), guards (zero requests), cancel, mid-flight tab switch, overlay tint
+  uniformity, pixel-exact composite pixels, entry points, undo/redo gating,
+  backup survival.
 - `behavior/routing.spec.ts` — deep-link landing (title, skip link,
   `aria-current`, real `href`), back/forward, unknown-path normalisation,
   `/inpaint?src=` resolution for generations + references, missing-id toast +

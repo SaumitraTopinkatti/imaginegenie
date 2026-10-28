@@ -32,6 +32,19 @@ export interface InpaintPromptInput {
   instruction: string;
   /** True (default): [original, marked]. False: [marked] only (the knob). */
   includeOriginal: boolean;
+  /** User reference images appended after the base images (0/absent = none). */
+  extraRefs?: number;
+}
+
+/**
+ * Extra-reference sentence. Refs are appended after the base images, so
+ * "the last N" is ordinal-safe for both variants (A: 3rd+, B: 2nd+).
+ */
+function extraRefLine(n: number): string {
+  if (n <= 0) return "";
+  return n === 1
+    ? "The last attached image is an extra reference for the red area only (style, subject or object). "
+    : `The last ${n} attached images are extra references for the red area only (style, subject or object). `;
 }
 
 /**
@@ -41,6 +54,7 @@ export interface InpaintPromptInput {
  */
 export function buildInpaintPrompt(input: InpaintPromptInput): string {
   const instruction = normalizeInstruction(input.instruction);
+  const extra = extraRefLine(input.extraRefs ?? 0);
   if (input.includeOriginal) {
     return (
       "INPAINTING EDIT. Two images of the same scene with identical framing are attached: " +
@@ -48,6 +62,7 @@ export function buildInpaintPrompt(input: InpaintPromptInput): string {
       `by a semi-transparent pure red (${MASK_COLOR}) overlay. The red overlay is only a selection ` +
       "marker — it is not part of the scene. " +
       "Apply the user's instruction ONLY inside the red-marked area and return the edited clean image. " +
+      extra +
       "\u201Cthis\u201D, \u201Cit\u201D, \u201Cthat\u201D, \u201Cthese\u201D, \u201Chere\u201D in the instruction " +
       "refer to whatever lies under the red overlay (clearly visible, untinted, in the clean original). " +
       "Outside the red area, keep the clean original exactly: same composition, framing, camera angle, " +
@@ -66,6 +81,7 @@ export function buildInpaintPrompt(input: InpaintPromptInput): string {
     "marker — it is not part of the scene; the content underneath stays visible through the tint. " +
     "Apply the user's instruction ONLY inside the red-marked area and return the edited image with " +
     "the overlay gone. " +
+    extra +
     "\u201Cthis\u201D, \u201Cit\u201D, \u201Cthat\u201D, \u201Cthese\u201D, \u201Chere\u201D in the instruction " +
     "refer to whatever lies under the red overlay. " +
     "Outside the red area, keep the image exactly: same composition, framing, camera angle, " +
