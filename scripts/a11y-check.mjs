@@ -24,15 +24,21 @@ try {
       code === 0 ? resolve() : reject(new Error(`a11y-scan exited ${code}`))
     );
   });
-  const results = JSON.parse(readFileSync(join(ROOT, "a11y/axe-results.json"), "utf8"));
-  let blocking = 0;
-  for (const s of results) {
-    for (const v of [...(s.violations ?? []), ...(s.violationsAllRules ?? [])]) {
-      if (v.impact === "serious" || v.impact === "critical") blocking += 1;
+  // Light (a11y/axe-results.json) and dark (a11y/axe-results-dark.json) both gate.
+  const blockingIn = (file) => {
+    const results = JSON.parse(readFileSync(join(ROOT, file), "utf8"));
+    let n = 0;
+    for (const s of results) {
+      for (const v of [...(s.violations ?? []), ...(s.violationsAllRules ?? [])]) {
+        if (v.impact === "serious" || v.impact === "critical") n += 1;
+      }
     }
-  }
-  console.log(`blocking (serious+critical) findings: ${blocking}`);
-  exitCode = blocking > 0 ? 1 : 0;
+    return n;
+  };
+  const light = blockingIn("a11y/axe-results.json");
+  const dark = blockingIn("a11y/axe-results-dark.json");
+  console.log(`blocking (serious+critical) findings: light ${light}, dark ${dark}, total ${light + dark}`);
+  exitCode = light + dark > 0 ? 1 : 0;
 } catch (e) {
   console.error(`a11y-check failed: ${e.message}`);
   exitCode = 1;

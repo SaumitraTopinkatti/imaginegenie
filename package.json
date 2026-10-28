@@ -15,7 +15,7 @@
     "typecheck:e2e": "tsc --noEmit -p e2e/tsconfig.json",
     "e2e:build": "vite build --mode e2e && node scripts/e2e-sentinel.mjs",
     "e2e": "npm run build && npm run e2e:build && playwright test",
-    "e2e:a11y": "playwright test e2e/a11y e2e/emulation --project=desktop --project=mobile --project=reduced-motion --project=forced-colors && node scripts/e2e-merge-axe.mjs",
+    "e2e:a11y": "playwright test e2e/a11y e2e/emulation --project=desktop --project=mobile --project=reduced-motion --project=forced-colors --project=dark --project=dark-mobile && node scripts/e2e-merge-axe.mjs",
     "e2e:keyboard": "playwright test e2e/keyboard",
     "e2e:shots": "npm run e2e:build && node scripts/e2e-shots.mjs",
     "a11y:all": "npm run lint:a11y && npm run build && npm run a11y && npm run e2e:build && npm run e2e:a11y",

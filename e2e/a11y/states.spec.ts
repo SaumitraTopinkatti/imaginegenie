@@ -18,6 +18,8 @@ const EMU_SUBSET = new Set([
 ]);
 const isEmu = () => test.info().project.name === "reduced-motion" || test.info().project.name === "forced-colors";
 const skipUnlessEmu = (name: string) => test.skip(isEmu() && !EMU_SUBSET.has(name), "emulation subset");
+// Mobile layouts run under "mobile" and its dark twin "dark-mobile".
+const isMobileProj = () => test.info().project.name === "mobile" || test.info().project.name === "dark-mobile";
 
 async function openMenu(app: Page) {
   await app.getByRole("button", { name: "Library", exact: true }).click();
@@ -26,7 +28,7 @@ async function openMenu(app: Page) {
 
 test("composer-empty", async ({ app }) => {
   skipUnlessEmu("composer-empty");
-  test.skip(test.info().project.name === "mobile", "mobile composer is a closed sheet; see mobile-sheet-open");
+  test.skip(isMobileProj(), "mobile composer is a closed sheet; see mobile-sheet-open");
   await expect(app.getByRole("textbox", { name: "Prompt", exact: true })).toBeVisible();
   await scanState(app, "composer-empty");
   if (test.info().project.name === "desktop") {
@@ -36,7 +38,7 @@ test("composer-empty", async ({ app }) => {
 
 test("composer-filled", async ({ app }) => {
   skipUnlessEmu("composer-filled");
-  test.skip(test.info().project.name === "mobile", "mobile composer is a closed sheet; see mobile-sheet-open");
+  test.skip(isMobileProj(), "mobile composer is a closed sheet; see mobile-sheet-open");
   await app.getByRole("textbox", { name: "Prompt", exact: true }).fill("A teal lighthouse at dusk, cinematic");
   await app.getByLabel("Seed (optional)").fill("42");
   await app.getByRole("button", { name: "More images" }).click();
@@ -45,7 +47,7 @@ test("composer-filled", async ({ app }) => {
 
 test("composer-error", async ({ app }) => {
   skipUnlessEmu("composer-error");
-  test.skip(test.info().project.name === "mobile", "mobile composer is a closed sheet; see mobile-sheet-open");
+  test.skip(isMobileProj(), "mobile composer is a closed sheet; see mobile-sheet-open");
   await app.getByRole("button", { name: /Generate/ }).click();
   await expect(app.locator("#gen-error")).toContainText("API key");
   await scanState(app, "composer-error");
@@ -53,7 +55,7 @@ test("composer-error", async ({ app }) => {
 
 test("generating", async ({ app }) => {
   skipUnlessEmu("generating");
-  test.skip(test.info().project.name === "mobile", "mobile composer is a closed sheet; see mobile-sheet-open");
+  test.skip(isMobileProj(), "mobile composer is a closed sheet; see mobile-sheet-open");
   await fillKey(app, "sk-or-test-ok");
   await app.getByRole("textbox", { name: "Prompt", exact: true }).fill("mid-flight loader [[mock:delay,ms=15000]]");
   await app.getByRole("button", { name: /Generate/ }).click();
@@ -356,7 +358,7 @@ test("drawer-open", async ({ app }) => {
 
 test("inpaint-empty", async ({ app }) => {
   skipUnlessEmu("inpaint-empty");
-  test.skip(test.info().project.name === "mobile", "mobile inpaint controls are a closed sheet; see inpaint-sheet-open");
+  test.skip(isMobileProj(), "mobile inpaint controls are a closed sheet; see inpaint-sheet-open");
   await gotoTab(app, "inpaint");
   await expect(app.getByRole("heading", { name: /Inpaint/ })).toBeVisible();
   await scanState(app, "inpaint-empty");
@@ -416,7 +418,7 @@ test("inpaint-refs", async ({ app }) => {
 });
 
 test("mobile-sheet-open", async ({ app }) => {
-  test.skip(test.info().project.name !== "mobile", "mobile sheet only");
+  test.skip(!isMobileProj(), "mobile sheet only");
   await app.getByRole("button", { name: /tap to expand/i }).click();
   await expect(app.getByRole("dialog", { name: "Image composer" })).toBeVisible();
   await scanState(app, "mobile-sheet-open");
@@ -424,7 +426,7 @@ test("mobile-sheet-open", async ({ app }) => {
 
 test("inpaint-sheet-open", async ({ app }) => {
   skipUnlessEmu("inpaint-sheet-open");
-  test.skip(test.info().project.name !== "mobile", "mobile sheet only");
+  test.skip(!isMobileProj(), "mobile sheet only");
   await seedLibrary(app, { records: [{ prompt: "Sheet state scene", imageUrl: pngDataUrl(256, 256, "solid") }] });
   await app.reload();
   await gotoTab(app, "inpaint");

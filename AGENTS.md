@@ -5,17 +5,17 @@ Single-user AI image studio (Vite + React 18 + TS). Prompt → OpenRouter (`POST
 ## Commands
 
 - `npm run build` — typecheck (`tsc --noEmit`) + build to `dist/`. Always run after edits.
-- `npm run a11y` — accessibility gate. Run **after** `npm run build`; it starts its own `vite preview` on `127.0.0.1:4173`, scans, kills it. Exits non-zero only on serious/critical findings.
+- `npm run a11y` — accessibility gate. Run **after** `npm run build`; it starts its own `vite preview` on `127.0.0.1:4173`, scans light + dark (same 4 states), kills it. Exits non-zero only on serious/critical findings (either theme).
 - `npm run a11y:scan` — scan only; expects a preview server already running.
 - `npm run a11y:all` — run-before-merge: `lint:a11y` → `build` → `a11y` → `e2e:build` → `e2e:a11y`. Zero-cost offline harness (in-memory mock store + loopback mock API on 4190/4191). `npm run e2e` = everything; `e2e:keyboard` = dialog contracts only; `e2e:shots` = state screenshots for visual review (never gates, see `e2e/VISUAL-REVIEW.md`). Never touch port 4173.
-- Runners: Playwright e2e (`npm run e2e`) + `eslint` jsx-a11y (`npm run lint:a11y`). Gates for "done": `lint:a11y` clean + `tsc` clean + `build` ok + `a11y` 0 serious/critical + `e2e:a11y` green (or full `npm run a11y:all`).
+- Runners: Playwright e2e (`npm run e2e`) + `eslint` jsx-a11y (`npm run lint:a11y`). Gates for "done": `lint:a11y` clean + `tsc` clean + `build` ok + `a11y` 0 serious/critical + `e2e:a11y` green incl. dark + dark-mobile (contrast enforced there, no color-contrast allowlist) (or full `npm run a11y:all`).
 - Node ≥18.18 (eslint 9 floor).
 
 ## Gotchas
 
 - App is served from root (`/`). Verify previews/screenshots at root, never a subpath.
 - Never manually run preview on port **4173**; `npm run a11y` owns it. For manual screenshots use another port (e.g. 4180+) launched **detached** — a foreground `vite preview` holds the console forever.
-- Kill preview servers and delete temp scripts/screenshots when done. Under `a11y/`: `axe-results.json` + `states/*.json` + `shots/` are gitignored per-run output; `e2e/__aria__/` snapshots are committed. Also clear `e2e-results/`, `playwright-report/`, `dist-e2e/` (all gitignored). Visual diffs need shots + model report + human approval before commit/push (logic-only skips).
+- Kill preview servers and delete temp scripts/screenshots when done. Under `a11y/`: `axe-results.json` + `axe-results-dark.json` + `states/*.json` + `shots/` are gitignored per-run output; `e2e/__aria__/` snapshots are committed. Also clear `e2e-results/`, `playwright-report/`, `dist-e2e/` (all gitignored). Visual diffs need shots + model report + human approval before commit/push (logic-only skips).
 - Studio loaders are always 1:1 (grid pending cards + solo hero share one square frame) so mid-run shape changes never resize or restart the animation; the hero reveal sits in the same square stage (`contain`). Grid thumbs are square. Inpaint loader + result keep the measured canvas box (`--loader-w` pinned at run start, `max-height: 70dvh` like `.mask-base`) so paint → load → After never jumps or grows the page.
 - Scroll fades use CSS `mask-image`, not overlay strips/`::before` gradients — axe flags those as incomplete color-contrast.
 - Security headers + enforcing CSP ship via `public/_headers` (Netlify, copied to `dist/`). New external host (API base, fonts, images) → update the matching CSP directive there and re-validate (see README `## Security`). `frame-ancestors 'none'` + `X-Frame-Options: DENY` must stay — app is never embedded.

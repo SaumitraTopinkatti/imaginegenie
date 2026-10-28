@@ -67,7 +67,7 @@ try {
 } catch { /* read-only git info, allowed to fail */ }
 
 const passthrough = process.argv.slice(2);
-const args = ["e2e/a11y/states.spec.ts", "--project=desktop", "--project=mobile", ...passthrough];
+const args = ["e2e/a11y/states.spec.ts", "--project=desktop", "--project=mobile", "--project=dark", "--project=dark-mobile", ...passthrough];
 console.log(`e2e-shots: run ${runId} — playwright test ${args.join(" ")}`);
 const pw = spawnSync(process.execPath, ["node_modules/@playwright/test/cli.js", "test", ...args], {
   cwd: ROOT,
@@ -101,11 +101,14 @@ try {
   }
 } catch { /* empty dir */ }
 
+const PROJECT_RANK = { desktop: 0, mobile: 1, dark: 2, "dark-mobile": 3 };
 metas.sort((a, b) => {
   const ia = orderIndex.has(a.state) ? orderIndex.get(a.state) : 1e9;
   const ib = orderIndex.has(b.state) ? orderIndex.get(b.state) : 1e9;
   if (ia !== ib) return ia - ib;
-  if (a.project !== b.project) return a.project === "desktop" ? -1 : 1;
+  const pa = PROJECT_RANK[a.project] ?? 9;
+  const pb = PROJECT_RANK[b.project] ?? 9;
+  if (pa !== pb) return pa - pb;
   return 0;
 });
 for (const m of metas) {
@@ -129,7 +132,7 @@ const manifest = {
 };
 writeFileSync(join(DIR, "manifest.json"), JSON.stringify(manifest, null, 2));
 
-// Contact sheet: groups in ORDER, desktop + mobile side by side.
+// Contact sheet: groups in ORDER; per state: desktop, mobile, dark, dark-mobile.
 let lastGroup = "";
 let cards = "";
 for (const s of shots) {

@@ -11,10 +11,15 @@ the fixture fails the test if the guard ever fires.
   `dist-e2e/`, absent from `dist/`).
 - `npm run e2e` — `build` + `e2e:build` + all Playwright projects.
 - `npm run e2e:a11y` — state + emulation suites (desktop, mobile,
-  reduced-motion, forced-colors) + merge into `a11y/axe-results.json`.
+  reduced-motion, forced-colors) + dark + dark-mobile (states only), then merge:
+  light → `a11y/axe-results.json`, dark → `a11y/axe-results-dark.json`
+  (one summary line per dark project; exits non-zero on any unallowlisted
+  violation in either group).
 - `npm run e2e:keyboard` — dialog contracts + keyboard specs.
-- `npm run e2e:shots` — viewport PNGs per state (`a11y/shots/`, gitignored) +
-  ordered manifest + contact sheet; review per `VISUAL-REVIEW.md`, never gates.
+- `npm run e2e:shots` — viewport PNGs per state (desktop, mobile, dark,
+  dark-mobile; dark shots named `<state>.dark.png` / `<state>.dark-mobile.png`)
+  in `a11y/shots/` (gitignored) + ordered manifest + contact sheet; review per
+  `VISUAL-REVIEW.md`, never gates.
 - `npm run a11y:all` — `lint:a11y` → `build` → `a11y` → `e2e:build` → `e2e:a11y`.
 - `npm run mock:api` — mock server standalone (manual poking).
 - `npm run typecheck:e2e` — `tsc` over `src/` + `e2e/` (drift guard included).
@@ -50,10 +55,18 @@ Ports (env-overridable): app 4190 (`E2E_APP_PORT`), mock API 4191
 - `a11y/states.spec.ts` — 36 states × projects; emulation runs a subset;
   ARIA snapshots (`__aria__/`) assert on desktop only (`inpaint-empty` skips
   mobile — its heading lives in the closed sheet; `inpaint-sheet-open` covers
-  the mobile sheet instead).
+  the mobile sheet instead). `dark` / `dark-mobile` (`colorScheme: "dark"`)
+  run the same states, no snapshots; `mobile` checks use `isMobileProj()`
+  so `dark-mobile` gets the same layout skips.
+- `a11y/dark-project.spec.ts` — guard: dark projects really render dark
+  (`html[data-theme=dark]`, `colorScheme` dark, body bg `rgb(15, 22, 20)`).
+  Dark projects only (testMatch).
 - `a11y/allowlist.json` — known incompletes with justification (`color-contrast`
   + one scoped `aria-valid-attr-value` on `lib-menu-open`: `true` is spec-valid,
-  popup is `role=group`, axe cannot verify popup type).
+  popup is `role=group`, axe cannot verify popup type). `color-contrast` is
+  `excludeProjects: ["dark", "dark-mobile"]`: contrast is enforced in dark
+  (no allowlist there). Axe `incomplete` results (not violations) are listed
+  in the merge output, not gated.
 - `keyboard/dialogs.spec.ts` — contract × 10 dialogs + menu/combobox/edit/skip/Ctrl+Enter.
 - `emulation/matrix.spec.ts` — viewport reflow, 1.4.12 spacing, target-size sweep
   (opacity-0 and closed-`<details>` controls excluded; see limits).
@@ -130,9 +143,11 @@ Ports (env-overridable): app 4190 (`E2E_APP_PORT`), mock API 4191
   gallery (explicit), backup export/restore → Library trigger (dialog return),
   key Test result announced via role=status/alert (asserted in api-key.spec).
 - `toast-ok`/`toast-err-sticky` wait out the staggered reveal
-  (`awaitRevealSettled`: `.reveal` count 0) before scanning — mid-fade text
-  scans below AA but no user rests on it; the settled card is the truthful
-  state. Animation untouched.
+  (`awaitRevealSettled`: `.reveal` count 0 and no `.gen-caption.fading`) before
+  scanning — mid-fade text scans below AA but no user rests on it; the settled
+  card is the truthful state. `.reveal` alone reads 0 before the solo hero's
+  reveal starts, so the fading loader caption was caught mid-fade (dark
+  desktop, 1.05:1 on an opacity-transitioning caption). Animation untouched.
 - Mobile sheet dialog semantics live on a `display:contents` wrapper div
   inside the composer `aside` (desktop stays a plain complementary region);
   role/name verified via `getByRole("dialog", { name: "Image composer" })`.

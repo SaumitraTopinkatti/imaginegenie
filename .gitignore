@@ -6,6 +6,7 @@ output*.png
 .env.local
 *.log
 a11y/axe-results.json
+a11y/axe-results-dark.json
 a11y/states/
 a11y/shots/
 e2e-results/

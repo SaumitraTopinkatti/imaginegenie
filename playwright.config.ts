@@ -79,6 +79,25 @@ export default defineConfig({
       },
       testMatch: ["**/a11y/states.spec.ts"],
     },
+    // Dark theme: states suite only (+ the dark-project guard). Contrast is
+    // enforced here: the global color-contrast allowlist is light-only
+    // (excludeProjects in allowlist.json). dark-mobile feeds shots + the gate.
+    {
+      name: "dark",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 720 }, colorScheme: "dark" },
+      testMatch: ["**/a11y/states.spec.ts", "**/a11y/dark-project.spec.ts"],
+    },
+    {
+      name: "dark-mobile",
+      use: {
+        ...devices["Pixel 7"],
+        viewport: { width: 390, height: 844 },
+        hasTouch: true,
+        isMobile: true,
+        colorScheme: "dark",
+      },
+      testMatch: ["**/a11y/states.spec.ts", "**/a11y/dark-project.spec.ts"],
+    },
     {
       name: "real-store",
       use: { ...devices["Desktop Chrome"], baseURL: `http://127.0.0.1:${PROD}/` },

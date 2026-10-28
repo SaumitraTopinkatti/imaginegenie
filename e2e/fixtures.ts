@@ -18,7 +18,10 @@ interface AllowEntry {
   reason: string;
   /** Scopes the entry: "state" or "state.project". Absent = all states. */
   states?: string[];
+  /** Projects this entry never applies to (e.g. dark: contrast is enforced). */
+  excludeProjects?: string[];
 }
+const SHOT_PROJECTS = ["desktop", "mobile", "dark", "dark-mobile"];
 const ALLOWLIST: AllowEntry[] = JSON.parse(
   readFileSync(join(HERE, "a11y/allowlist.json"), "utf8")
 );
@@ -218,6 +221,9 @@ export async function ensureComposerOpen(page: Page) {
  */
 export async function awaitRevealSettled(page: Page) {
   await expect(page.locator(".reveal")).toHaveCount(0, { timeout: 15000 });
+  // `.reveal` reads 0 before the solo hero's reveal even starts; its loader
+  // caption fades out (0.3s) until the slot merges. Wait that out too.
+  await expect(page.locator(".gen-caption.fading")).toHaveCount(0, { timeout: 15000 });
 }
 
 /**
@@ -343,13 +349,13 @@ export async function assertLayeredEsc(
 /* ---------- shot capture (visual review, env-gated) ---------- */
 
 // Best-effort viewport screenshot for human/model visual review. Runs only
-// when E2E_SHOTS_RUN is set (by scripts/e2e-shots.mjs) on desktop/mobile.
-// Never throws: capture failure must not fail the a11y test.
+// when E2E_SHOTS_RUN is set (by scripts/e2e-shots.mjs) on desktop/mobile
+// and their dark variants. Never throws: capture failure must not fail the a11y test.
 export async function captureShot(page: Page, state: string): Promise<void> {
   const runId = process.env.E2E_SHOTS_RUN;
   if (!runId) return;
   const project = test.info().project.name.replace(/[^a-z0-9-]+/gi, "-");
-  if (project !== "desktop" && project !== "mobile") return;
+  if (!SHOT_PROJECTS.includes(project)) return;
   try {
     const { mkdirSync, writeFileSync } = await import("node:fs");
     const dir = join(ROOT, "a11y/shots");
@@ -411,7 +417,9 @@ export async function scanState(page: Page, state: string): Promise<AxeStateResu
   const full = await new AxeBuilder({ page }).analyze();
   const project = test.info().project.name.replace(/[^a-z0-9-]+/gi, "-");
   const applicable = ALLOWLIST.filter(
-    (a) => !a.states || a.states.includes(state) || a.states.includes(`${state}.${project}`)
+    (a) =>
+      (!a.states || a.states.includes(state) || a.states.includes(`${state}.${project}`)) &&
+      !(a.excludeProjects ?? []).includes(project)
   );
   const allowed = new Set(applicable.map((a) => a.id));
   const blocking = [...tagged.violations, ...full.violations].filter((v) => !allowed.has(v.id));

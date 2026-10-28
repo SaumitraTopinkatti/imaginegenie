@@ -94,7 +94,7 @@ Threat-model notes (honest limits):
 - `npm run lint:a11y` — jsx-a11y static lint over `src/` (zero warnings)
 - `npm run a11y:all` — run-before-merge: `lint:a11y` → `build` → `a11y` → `e2e:build` → `e2e:a11y`
 - `npm run e2e` — full Playwright suite: prod `build` + mock `e2e:build` + all projects (zero-cost, offline — no real OpenRouter calls)
-- `npm run e2e:a11y` — a11y state + emulation suites, merges into `a11y/axe-results.json`
+- `npm run e2e:a11y` — a11y state + emulation suites (light) + dark / dark-mobile state suites; merges into `a11y/axe-results.json` (light) and `a11y/axe-results-dark.json` (dark, contrast enforced)
 - `npm run e2e:keyboard` — dialog/keyboard contracts only
 - `npm run mock:api` — standalone loopback mock API (manual poking)
 - `npm run typecheck:e2e` — `tsc` over `src/` + `e2e/` (mock drift guard)

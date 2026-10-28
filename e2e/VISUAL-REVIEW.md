@@ -11,7 +11,8 @@ Shots never gate: no pixel asserts, no committed images.
 ## Commands
 
 - Full: `npm run e2e:shots` (builds `dist-e2e`, captures desktop 1280 +
-  mobile 390, writes `a11y/shots/manifest.json` + `index.html`).
+  mobile 390, plus dark (1280) + dark-mobile (390) variants, writes
+  `a11y/shots/manifest.json` + `index.html`).
 - Scoped: `npm run e2e:shots -- -g inpaint` (passthrough to Playwright;
   `-g` matches as regex substring). Wipes the dir first, so a scoped run
   holds only that subset under a new run id.
@@ -21,7 +22,10 @@ Shots never gate: no pixel asserts, no committed images.
 ## Naming / order
 
 `a11y/shots/<state>.<project>.png` + `<state>.<project>.meta.json`
-sidecar (`runId`, viewport, path, `fontLoaded`, timestamp). Groups:
+sidecar (`runId`, viewport, path, `fontLoaded`, timestamp). Project is
+`desktop`, `mobile`, `dark`, or `dark-mobile` (dark = `colorScheme: dark`,
+same state, same viewport; flat folder, separated by the `.dark` suffix).
+Contact sheet order per state: desktop, mobile, dark, dark-mobile. Groups:
 
 | Group | States |
 |---|---|
@@ -75,7 +79,7 @@ Human corrects/approves before any commit/push of a visual change.
 
 ## Cleanup
 
-`rm -rf a11y/shots a11y/states a11y/axe-results.json e2e-results playwright-report dist-e2e`
+`rm -rf a11y/shots a11y/states a11y/axe-results.json a11y/axe-results-dark.json e2e-results playwright-report dist-e2e`
 
 ## Non-goals
 

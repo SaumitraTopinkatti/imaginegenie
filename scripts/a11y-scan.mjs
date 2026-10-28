@@ -30,64 +30,89 @@ async function scanState(page, state) {
   };
 }
 
+// One full pass over the 4 states in a fresh context. colorScheme "dark" makes
+// the app resolve data-theme=dark (theme "system" default) — asserted below so a
+// dark pass can never silently scan the light palette.
+async function scanPass(browser, { colorScheme, label }) {
+  const context = colorScheme ? await browser.newContext({ colorScheme }) : await browser.newContext();
+  const page = await context.newPage();
+  await page.goto(URL, { waitUntil: "networkidle" });
+  await page.locator("body").waitFor();
+  if (colorScheme === "dark") {
+    const theme = await page.evaluate(() => document.documentElement.getAttribute("data-theme"));
+    if (theme !== "dark") throw new Error(`${label}: expected data-theme=dark, got ${theme}`);
+  }
+
+  const out = [];
+
+  // State 1: composer (initial load)
+  out.push(await scanState(page, "composer"));
+
+  // State 2: references tab (open drawer, switch, scan, switch back)
+  try {
+    await page.getByRole("button", { name: /sections menu/i }).click();
+    await page.getByRole("link", { name: /^References/ }).click();
+    await page.locator(".refs-panel").waitFor({ timeout: 5000 });
+    // Drawer closes on switch (opacity/transform ~0.26s): scanning mid-fade
+    // reports a contrast failure no user ever rests on.
+    await page.waitForTimeout(400);
+    out.push(await scanState(page, "references"));
+    await page.getByRole("button", { name: /sections menu/i }).click();
+    await page.getByRole("link", { name: /^Studio/ }).click();
+    await page.locator("#gallery").waitFor({ timeout: 5000 });
+  } catch (e) {
+    console.log(`[references] not reachable (${e.message?.split("\n")[0]}) — skipped`);
+    out.push({ state: "references", skipped: true, reason: e.message });
+  }
+
+  // State 3: gallery (if cards exist; else still scan same DOM as gallery state)
+  try {
+    await page.locator(".card").first().waitFor({ timeout: 5000 });
+    out.push(await scanState(page, "gallery"));
+  } catch {
+    console.log("[gallery] no .card nodes found — scanning current DOM as gallery");
+    out.push(await scanState(page, "gallery"));
+  }
+
+  // State 3: lightbox (click first card, wait for overlay)
+  try {
+    const card = page.locator(".card").first();
+    await card.waitFor({ timeout: 5000 });
+    await card.click();
+    await page.locator(".overlay").waitFor({ timeout: 5000 });
+    out.push(await scanState(page, "lightbox"));
+  } catch (e) {
+    console.log(`[lightbox] not reachable (${e.message?.split("\n")[0]}) — skipped`);
+    out.push({ state: "lightbox", skipped: true, reason: "no gallery cards (empty library, fresh profile)" });
+  }
+
+  await context.close();
+  return out;
+}
+
+function report(label, out) {
+  for (const s of out) {
+    for (const v of [...(s.violations ?? []), ...(s.violationsAllRules ?? [])]) {
+      console.log(`${label}${s.state}: ${v.id} (${v.impact}) x${v.nodesCount} — ${v.help}`);
+    }
+    if (s.incomplete?.length) {
+      console.log(`${label}${s.state} incomplete: ${s.incomplete.map((i) => `${i.id} x${i.nodesCount}`).join(", ")}`);
+    }
+  }
+}
+
 const browser = await chromium.launch();
-const context = await browser.newContext();
-const page = await context.newPage();
-await page.goto(URL, { waitUntil: "networkidle" });
-await page.locator("body").waitFor();
-
-const out = [];
-
-// State 1: composer (initial load)
-out.push(await scanState(page, "composer"));
-
-// State 2: references tab (open drawer, switch, scan, switch back)
+let light;
+let dark;
 try {
-  await page.getByRole("button", { name: /sections menu/i }).click();
-  await page.getByRole("link", { name: /^References/ }).click();
-  await page.locator(".refs-panel").waitFor({ timeout: 5000 });
-  // Drawer closes on switch (opacity/transform ~0.26s): scanning mid-fade
-  // reports a contrast failure no user ever rests on.
-  await page.waitForTimeout(400);
-  out.push(await scanState(page, "references"));
-  await page.getByRole("button", { name: /sections menu/i }).click();
-  await page.getByRole("link", { name: /^Studio/ }).click();
-  await page.locator("#gallery").waitFor({ timeout: 5000 });
-} catch (e) {
-  console.log(`[references] not reachable (${e.message?.split("\n")[0]}) — skipped`);
-  out.push({ state: "references", skipped: true, reason: e.message });
+  light = await scanPass(browser, { label: "light" });
+  dark = await scanPass(browser, { colorScheme: "dark", label: "dark" });
+} finally {
+  await browser.close();
 }
-
-// State 3: gallery (if cards exist; else still scan same DOM as gallery state)
-try {
-  await page.locator(".card").first().waitFor({ timeout: 5000 });
-  out.push(await scanState(page, "gallery"));
-} catch {
-  console.log("[gallery] no .card nodes found — scanning current DOM as gallery");
-  out.push(await scanState(page, "gallery"));
-}
-
-// State 3: lightbox (click first card, wait for overlay)
-try {
-  const card = page.locator(".card").first();
-  await card.waitFor({ timeout: 5000 });
-  await card.click();
-  await page.locator(".overlay").waitFor({ timeout: 5000 });
-  out.push(await scanState(page, "lightbox"));
-} catch (e) {
-  console.log(`[lightbox] not reachable (${e.message?.split("\n")[0]}) — skipped`);
-  out.push({ state: "lightbox", skipped: true, reason: "no gallery cards (empty library, fresh profile)" });
-}
-
-await browser.close();
 mkdirSync("a11y", { recursive: true });
-writeFileSync("a11y/axe-results.json", JSON.stringify(out, null, 2));
-console.log("Wrote a11y/axe-results.json");
-for (const s of out) {
-  for (const v of [...(s.violations ?? []), ...(s.violationsAllRules ?? [])]) {
-    console.log(`${s.state}: ${v.id} (${v.impact}) x${v.nodesCount} — ${v.help}`);
-  }
-  if (s.incomplete?.length) {
-    console.log(`${s.state} incomplete: ${s.incomplete.map((i) => `${i.id} x${i.nodesCount}`).join(", ")}`);
-  }
-}
+writeFileSync("a11y/axe-results.json", JSON.stringify(light, null, 2));
+writeFileSync("a11y/axe-results-dark.json", JSON.stringify(dark, null, 2));
+console.log("Wrote a11y/axe-results.json + a11y/axe-results-dark.json");
+report("", light);
+report("[dark] ", dark);

@@ -1,7 +1,8 @@
 [
   {
     "id": "color-contrast",
-    "reason": "axe cannot compute masked/canvas-adjacent contrast here; tokens verified statically (body/muted 4.9-5.7:1, white-on-teal 5.24:1). Tracked in ACCESSIBILITY-AUDIT.md S6."
+    "excludeProjects": ["dark", "dark-mobile"],
+    "reason": "axe cannot compute masked/canvas-adjacent contrast here; tokens verified statically (body/muted 4.9-5.7:1, white-on-teal 5.24:1). Tracked in ACCESSIBILITY-AUDIT.md S6. Light only: dark projects enforce color-contrast (no allowlist)."
   },
   {
     "id": "aria-valid-attr-value",
